@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit (Go ${{ matrix.go-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version:
+          - 1.25.5
+          - 1.26.x
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Verify module tidiness
+        run: go mod tidy -diff
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.4.0
+          args: ./...
+
+      - name: Race tests
+        run: go test -race ./...
+
+      - name: Dependency hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for pkg in ./result ./fileops; do
+            deps="$(go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' -deps "$pkg")"
+            if grep -E 'local-symphony|internal/dispatcher|eino-ext|otel|slog|^log$' <<<"$deps"; then
+              echo "forbidden dependency in $pkg" >&2
+              exit 1
+            fi
+          done
