@@ -11,8 +11,17 @@ agent workers.
 - `search`: ripgrep-backed workspace search tool.
 - `shell`: shell command execution tool.
 - `tracker`: tracker interfaces used by tracker tools.
+- `tracker/beads`: adapter from `github.com/mattsp1290/beads-go/beads` to
+  `tracker.CloseWriter`.
 - `trackerwrite`: `tracker_write` tool; v0.1 executes `op=close` through
   `tracker.CloseWriter`.
+
+## Requirements
+
+- Go 1.26 or newer.
+- `rg` on `PATH` for `search`.
+- `bd` on `PATH` only for consumers that use `tracker/beads` with the default
+  beads-go exec-backed client, or for the tagged integration test.
 
 ## Examples
 
@@ -69,6 +78,17 @@ res := trackerTool.Run(ctx, trackerwrite.Args{
 })
 ```
 
+```go
+beadsTracker, err := beads.NewClient(
+	beadssdk.WithDataDir(".beads"),
+	beadssdk.WithActor("agent"),
+)
+if err != nil {
+	return err
+}
+err = beadsTracker.Close(ctx, "project-123", "fixed")
+```
+
 ## Runtime Notes
 
 `search` shells out to `rg`; consumers must provide ripgrep on `PATH`.
@@ -77,6 +97,10 @@ res := trackerTool.Run(ctx, trackerwrite.Args{
 configured workspace. The package sets cwd, stdin, output caps, timeout, and
 process cancellation behavior; filesystem containment, network policy, secrets,
 and sandboxing are caller responsibilities.
+
+`tracker/beads` uses the beads-go SDK. It does not import `os/exec` directly and
+does not parse `bd` CLI output itself; command execution and JSON decoding live
+in `beads-go`.
 
 All tools return model-facing JSON envelopes with stable `outcome` strings.
 Result structs that may be decoded by consumers preserve unknown top-level JSON

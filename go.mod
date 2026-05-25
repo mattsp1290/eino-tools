@@ -1,10 +1,11 @@
 module github.com/mattsp1290/eino-tools
 
-go 1.25.5
+go 1.26
 
 require (
 	github.com/cloudwego/eino v0.8.13
 	github.com/eino-contrib/jsonschema v1.0.3
+	github.com/mattsp1290/beads-go v0.1.0
 )
 
 require (

@@ -17,7 +17,6 @@ jobs:
       fail-fast: false
       matrix:
         go-version:
-          - 1.25.5
           - 1.26.x
 
     steps:
@@ -55,10 +54,61 @@ jobs:
             exit 1
           fi
 
+          if rg -n '"(github.com/cloudwego/eino-ext[^"]*|go\.opentelemetry\.io/[^"]*|log|log/slog|[^"]*/auth[^"]*)"' --glob '*.go' .; then
+            echo "forbidden telemetry/log/auth import in Go source" >&2
+            exit 1
+          fi
+
+          for pkg in ./result ./fileops ./tracker; do
+            imports="$(go list -f '{{join .Imports "\n"}}' "$pkg")"
+            if grep -E '^os/exec$' <<<"$imports"; then
+              echo "forbidden os/exec import in $pkg" >&2
+              exit 1
+            fi
+          done
+
           for pkg in ./result ./fileops ./search ./shell ./tracker ./trackerwrite; do
             deps="$(go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' -deps "$pkg")"
-            if grep -E 'local-symphony|internal/dispatcher|eino-ext|otel|slog|^log$' <<<"$deps"; then
+            if grep -E 'local-symphony|internal/dispatcher|eino-ext|otel|slog|^log$|beads-go' <<<"$deps"; then
               echo "forbidden dependency in $pkg" >&2
               exit 1
             fi
           done
+
+          tracker_beads_deps="$(go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' -deps ./tracker/beads)"
+          if ! grep -q '^github.com/mattsp1290/beads-go/beads$' <<<"$tracker_beads_deps"; then
+            echo "tracker/beads does not import beads-go SDK" >&2
+            exit 1
+          fi
+          if grep -E 'local-symphony|internal/dispatcher|eino-ext|otel|slog|^log$' <<<"$tracker_beads_deps"; then
+            echo "forbidden dependency in ./tracker/beads" >&2
+            exit 1
+          fi
+
+  tracker-beads-integration:
+    name: Tracker Beads Integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.x
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install bd
+        run: npm install -g @beads/bd
+
+      - name: Verify bd
+        run: bd --version
+
+      - name: Integration tests
+        run: go test -tags=integration ./tracker/beads/...

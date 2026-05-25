@@ -54,10 +54,23 @@ type Args struct {
 
 // Result is the structured envelope returned to the model.
 type Result struct {
-	Outcome result.Outcome `json:"outcome"`
-	Op      Op             `json:"op,omitempty"`
-	ID      string         `json:"id,omitempty"`
-	Error   *ResultError   `json:"error,omitempty"`
+	Outcome result.Outcome  `json:"outcome"`
+	Op      Op              `json:"op,omitempty"`
+	ID      string          `json:"id,omitempty"`
+	Error   *ResultError    `json:"error,omitempty"`
+	RawJSON json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON decodes Result and preserves the original object in RawJSON.
+func (r *Result) UnmarshalJSON(raw []byte) error {
+	type resultEnvelope Result
+	var decoded resultEnvelope
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	*r = Result(decoded)
+	r.RawJSON = append(r.RawJSON[:0], raw...)
+	return nil
 }
 
 // ResultError is the structured failure envelope nested inside Result.

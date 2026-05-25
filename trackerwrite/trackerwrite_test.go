@@ -1,6 +1,7 @@
 package trackerwrite
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -223,6 +224,27 @@ func TestResultIsRetryable(t *testing.T) {
 				t.Fatalf("IsRetryable() = %t, want %t", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResultPreservesUnknownFieldsInRawJSON(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"outcome":"succeeded","op":"close","id":"T-1","future":"field"}`)
+	var got Result
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !bytes.Contains(got.RawJSON, []byte(`"future"`)) {
+		t.Fatalf("RawJSON = %s, want future field preserved", got.RawJSON)
+	}
+
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("RawJSON")) || bytes.Contains(encoded, []byte("future")) {
+		t.Fatalf("marshal emitted raw/future field: %s", encoded)
 	}
 }
 
