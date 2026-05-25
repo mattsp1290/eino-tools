@@ -1,7 +1,6 @@
 package fileops
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/eino-contrib/jsonschema"
 
+	"github.com/mattsp1290/eino-tools/internal/jsoncompat"
 	"github.com/mattsp1290/eino-tools/result"
 )
 
@@ -240,35 +240,7 @@ func isDescendant(parent, resolved string, allowRoot bool) bool {
 }
 
 func rejectDuplicateTopLevelKeys(raw []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	tok, err := dec.Token()
-	if err != nil {
-		return nil //nolint:nilerr
-	}
-	delim, ok := tok.(json.Delim)
-	if !ok || delim != '{' {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return nil //nolint:nilerr
-		}
-		key, ok := keyTok.(string)
-		if !ok {
-			return nil
-		}
-		if _, dup := seen[key]; dup {
-			return fmt.Errorf("duplicate top-level key %q", key)
-		}
-		seen[key] = struct{}{}
-		var skip json.RawMessage
-		if err := dec.Decode(&skip); err != nil {
-			return nil //nolint:nilerr
-		}
-	}
-	return nil
+	return jsoncompat.RejectDuplicateTopLevelKeys(raw)
 }
 
 func validateWorkspacePath(workspacePath string) error {

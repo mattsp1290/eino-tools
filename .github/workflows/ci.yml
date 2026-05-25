@@ -50,7 +50,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          for pkg in ./result ./fileops; do
+          if rg -n 'github.com/mattsp1290/local-symphony/internal/dispatcher|dispatcher\.ToolOutcome' --glob '*.go' .; then
+            echo "forbidden dispatcher reference in Go source" >&2
+            exit 1
+          fi
+
+          for pkg in ./result ./fileops ./search ./shell ./tracker ./trackerwrite; do
             deps="$(go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' -deps "$pkg")"
             if grep -E 'local-symphony|internal/dispatcher|eino-ext|otel|slog|^log$' <<<"$deps"; then
               echo "forbidden dependency in $pkg" >&2
