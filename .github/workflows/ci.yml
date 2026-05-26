@@ -29,6 +29,9 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Verify module tidiness
         run: go mod tidy -diff
 
