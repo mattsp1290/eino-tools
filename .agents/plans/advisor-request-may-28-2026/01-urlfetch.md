@@ -17,6 +17,7 @@ Fetches the raw text content of a `file://` or `https://` URL and returns it as 
 ```
 urlfetch/
 ├── doc.go
+├── options.go
 ├── urlfetch.go
 └── urlfetch_test.go
 ```
@@ -34,7 +35,7 @@ type Args struct {
 ```
 
 - `url` is required, must be non-empty.
-- Supported schemes: `file` and `https`. Reject others (including plain `http`) at validation with `ErrCategoryValidation`.
+- Supported schemes: `file` and `https`. Reject others (including plain `http`) at validation with `ErrCategoryValidation`. The validation error message must name the rejected scheme and tell the caller to use `https://` (e.g. `unsupported scheme "http"; use https`) so a model retrying blind doesn't loop.
 
 ### JSON Schema
 
@@ -108,6 +109,8 @@ func New(opts ...Options) (*Tool, error) { ... }
 
 No workspace path is required — URLs are absolute by definition. `file://` URLs intentionally reach outside any workspace: the canonical use case reads a doc from `~/docs/`. This is a deliberate contrast with the fileops tools (which enforce workspace containment); call it out in `doc.go` and the inventory entry so reviewers don't flag the absence as a mistake.
 
+`file://host/path` (non-empty authority component) must be rejected with `ErrCategoryValidation` — `url.Parse` populates `u.Host` with the authority and `os.ReadFile(u.Path)` would silently ignore it. The rejection message should name what was wrong (e.g. `file URL must not include a host; use file:///path`).
+
 ### Options
 
 ```go
@@ -124,17 +127,33 @@ The default client must have an explicit timeout — `net/http`'s zero-value cli
 var defaultClient = &http.Client{Timeout: 30 * time.Second}
 ```
 
-The injectable client is what makes HTTPS tests practical (use `httptest.NewServer`).
+The injectable client is what makes HTTPS tests practical — see test cases for the correct pattern.
+
+`resolveOptions` must mirror shell.go lines 129-142 exactly: accept 0 or 1 Options value, return an error if more than one is passed. This is the consistent cross-tool contract.
 
 ---
 
 ## Implementation notes
 
+### Context propagation
+
+`Run` must check `ctx.Err()` at the very top before doing any I/O (mirrors shell.go:184). For HTTPS, use `http.NewRequestWithContext` — not `client.Get`, which ignores `ctx` and is uncancelable:
+
+```go
+if err := ctx.Err(); err != nil {
+    return failedResult(ErrCategoryCanceled, err.Error())
+}
+```
+
+Add `ErrCategoryCanceled = "canceled"` to the error categories. `IsRetryable` returns false for canceled.
+
 ### `file://` handling
 
-Parse with `url.Parse`, then call `os.ReadFile(u.Path)`. No containment check — by design.
+Parse with `url.Parse`. Reject non-empty `u.Host` with `ErrCategoryValidation` (see constructor section). Then call `os.ReadFile(u.Path)`. No containment check — by design.
 
-Annotate with a `//nolint:gosec` on the `os.ReadFile` call (gosec G304: variable file path) with a justification comment, mirroring shell.go's G204 annotation:
+Distinguish `not_found` from `io` using `errors.Is(err, fs.ErrNotExist)` — not the deprecated `os.IsNotExist`. The `errorlint` linter (enabled in `.golangci.yml`) requires `errors.Is`.
+
+Annotate the `os.ReadFile` call (gosec G304: variable file path):
 
 ```go
 // gosec G304: caller supplies the path; no workspace containment is intended.
@@ -144,11 +163,13 @@ content, err := os.ReadFile(u.Path) //nolint:gosec
 
 ### `https://` handling
 
-Use the injected (or default) `*http.Client`. Call `client.Get(rawURL)`. Annotate:
+Use `http.NewRequestWithContext` so the call respects `ctx` cancellation. The G107 annotation belongs on the request-construction line where `rawURL` is consumed:
 
 ```go
 // gosec G107: variable URL in HTTP request is the tool's explicit purpose.
-resp, err := t.httpClient.Get(rawURL) //nolint:gosec
+req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil) //nolint:gosec
+if err != nil { ... }
+resp, err := t.httpClient.Do(req)
 ```
 
 Always call `resp.Body.Close()` (defer after checking err).
@@ -181,14 +202,17 @@ TestTool_Run_HTTPSScheme
   - 404 response returns not_found
   - 500 response returns network error
   - connection refused returns network error
-  - TLS error returns network error
-  (use httptest.NewTLSServer or httptest.NewServer for local HTTP tests)
+  (use httptest.NewTLSServer — NOT httptest.NewServer, which serves http:// and
+   would be rejected at validation before the request is made; inject srv.Client()
+   via Options.HTTPClient so TLS cert verification passes against the test server)
 
 TestTool_Run_Validation
   - empty URL returns validation error
-  - http:// scheme rejected (validation)
+  - http:// scheme rejected (validation); error message names scheme and suggests https://
   - ftp:// scheme rejected (validation)
   - malformed URL rejected (validation)
+  - file://host/path rejected (validation; non-empty host)
+  - canceled ctx returns canceled error before any I/O
 
 TestTool_InvokableRun
   - empty JSON returns error
@@ -207,6 +231,7 @@ TestIsRetryable
   - succeeded → false
   - not_found → false
   - validation → false
+  - canceled → false
   - network → true
   - unknown → true
 ```
@@ -224,7 +249,7 @@ TestIsRetryable
 | Line | Rule | Justification |
 |------|------|---------------|
 | `os.ReadFile(u.Path)` | G304 | Caller supplies path; loading arbitrary local files is the tool's purpose |
-| `t.httpClient.Get(rawURL)` | G107 | Variable URL in HTTP request is the tool's explicit purpose |
+| `http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)` | G107 | Variable URL in HTTP request is the tool's explicit purpose |
 
 ---
 

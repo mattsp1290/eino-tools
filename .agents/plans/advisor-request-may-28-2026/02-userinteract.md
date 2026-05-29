@@ -22,6 +22,7 @@ The tool does not format questions, validate answers, or offer multiple-choice o
 ```
 userinteract/
 ├── doc.go
+├── options.go
 ├── userinteract.go
 └── userinteract_test.go
 ```
@@ -89,7 +90,11 @@ type Args struct {
 - `question` is required (non-empty string).
 - `answer` is optional. When present and non-empty, it takes precedence over the surface — the tool echoes it immediately as a successful result on both surfaces.
 
-### JSON Schema
+### The `answer` field is agent-loop-owned, not model-owned
+
+**This is a trust boundary.** `answer` exists in the schema as a transport field so the agent loop can inject the collected human response via a follow-up tool call. It must not be described as something the model should populate itself — a model that generates its own value for `answer` would bypass the human-in-the-loop entirely.
+
+The schema description must make this explicit. The model-facing description should say the field is reserved for the agent loop:
 
 ```json
 {
@@ -103,12 +108,14 @@ type Args struct {
     },
     "answer": {
       "type": "string",
-      "description": "When non-empty, the tool returns this as the answer immediately without blocking. Used in MCP mode to provide the user's response in a follow-up call."
+      "description": "Reserved for the agent loop. Do not populate this field — it will be set by the loop after the user responds. When non-empty, the tool returns this value as the answer immediately."
     }
   },
   "required": ["question"]
 }
 ```
+
+Note: this is a soft guardrail. A sufficiently determined or confused model can still populate `answer`. The agent loop author must understand the contract (documented in the MCP section below) and should not rely solely on the schema description to prevent misuse.
 
 ---
 
@@ -124,10 +131,15 @@ This is stateless. The tool holds no cross-call state. The MCP contract is:
 1. Agent calls `user_interact` with `question`.
 2. Tool returns `pending` — the question text is in the result so the MCP host can display it.
 3. MCP host collects the user's answer (out of band).
-4. Agent calls `user_interact` again with both `question` and `answer`.
+4. **Agent loop** (not the model) calls `user_interact` again with both `question` and `answer`, where `answer` contains the human's response.
 5. Tool returns `succeeded` with the answer.
 
-The agent loop (not the tool) is responsible for persisting state between calls 2 and 4.
+The agent loop (not the tool, not the model) is responsible for:
+- Persisting the pending question between calls 2 and 4
+- Collecting the human's actual response and populating `answer`
+- Correlating the follow-up call to the correct pending question
+
+**Single-outstanding-question assumption:** The tool performs zero pairing validation between a pending question and a subsequent answer. If the agent loop ever has more than one question in flight simultaneously, it is entirely the loop's responsibility to route answers correctly — the tool cannot help. This assumption must be documented in `doc.go`. If the planner needs concurrent questions, a correlation ID field (`id string`) should be added to both Args and Result before shipping; the tool would echo it through without inspecting it, giving the loop a key to match on. Add as an option if the planner architect requests it.
 
 ---
 
@@ -174,13 +186,16 @@ type Result struct {
 type Result struct {
     Outcome  Outcome         `json:"outcome"`
     Answer   string          `json:"answer,omitempty"`
-    Question string          `json:"question,omitempty"` // echoed in pending results
+    // Question is set only when Outcome == OutcomePending. It is the verbatim
+    // echo of Args.Question so the MCP host can display it without tracking it
+    // separately. It is not set on succeeded or failed results.
+    Question string          `json:"question,omitempty"`
     Error    *ResultError    `json:"error,omitempty"`
     RawJSON  json.RawMessage `json:"-"`
 }
 ```
 
-`Question` is included in pending results so the MCP host has the text to display to the user without needing to track it separately.
+`Question` is set only in pending results. A consumer must not branch on its presence as a proxy for the outcome — use `Outcome` as the discriminator.
 
 ### ResultError
 
@@ -201,7 +216,9 @@ type ResultError struct {
 
 ### IsRetryable
 
-- All failures → `false`. Validation errors won't become valid on retry. IO errors on stdin are not transient in any meaningful sense. Pending is not an error.
+- All outcomes (including `unknown`) → `false`.
+
+This diverges from shell and urlfetch, which return `true` for `unknown`. The divergence is intentional: stdin I/O errors and validation errors on a human-interaction tool are not transient failures that benefit from automated retry. Document this in `doc.go`. The `unknown` category is included in the test matrix (see below) despite being non-retryable.
 
 ---
 
@@ -216,7 +233,25 @@ type ResultError struct {
 4. Return succeeded{answer: strings.TrimRight(accumulated, "\n")}
 ```
 
-Use a `bufio.Scanner` on `t.stdin`. Handle EOF via `scanner.Err() == nil && !scanner.Scan()` pattern.
+Use a `bufio.Scanner` on `t.stdin`. Correct loop pattern:
+
+```go
+scanner := bufio.NewScanner(t.stdin)
+var lines []string
+for scanner.Scan() {
+    line := scanner.Text()
+    if line == "" {
+        break // blank line terminates
+    }
+    lines = append(lines, line)
+}
+if err := scanner.Err(); err != nil {
+    return failedResult(ErrCategoryIO, err.Error())
+}
+// clean EOF (scanner.Err() == nil, scanner.Scan() returned false) is success
+```
+
+**64 KB line cap:** `bufio.Scanner` has a default token size of 64 KB. A pasted answer with a line longer than 64 KB triggers `bufio.ErrTooLong`, which surfaces as an `io` error. To handle larger pastes, call `scanner.Buffer(make([]byte, 1<<20), 1<<20)` to raise the cap to 1 MiB before the loop. Document the chosen cap in `doc.go`.
 
 ---
 
@@ -279,6 +314,7 @@ TestIsRetryable
   - pending → false
   - failed/validation → false
   - failed/io → false
+  - failed/unknown → false (intentional divergence from shell/urlfetch; see IsRetryable section)
 ```
 
 The panicking reader test pattern:

@@ -31,7 +31,7 @@ The request explicitly preserves this option: if `userinteract`'s surface-awaren
 
 These must be answered before `userinteract` code is written. Full context is in `02-userinteract.md`.
 
-**Q1 — Outcome representation:** Recommend a tool-local `Outcome` enum `{succeeded, pending, failed}` rather than importing `result.Outcome`. ADR 0001 closes the shared enum and each tool owns its result shape. The alternative (use `result.Outcome = "succeeded"` plus a `Pending bool` field) is more conventional but semantically awkward. **Which do you prefer?**
+**Q1 — Outcome representation:** Recommend a tool-local `Outcome` enum `{succeeded, pending, failed}` rather than importing `result.Outcome`. ADR 0001 closes the shared enum and each tool owns its result shape. The alternative (use `result.Outcome = "succeeded"` plus a `Pending bool` field) is more conventional but semantically awkward. **Which do you prefer? This decision must be settled and the proposed ADR committed to `docs/adr/` before any `userinteract` code is written** — the enum choice affects every call site and is not safely changed post-implementation.
 
 **Q2 — Stateless MCP design:** The plan models MCP interaction as stateless: the caller provides the answer via a follow-up tool call with `answer` non-empty in Args. The tool holds no cross-call state. Confirm this contract fits the planner's agent loop before implementing.
 
@@ -66,6 +66,7 @@ Every new tool in this repo requires all of the following. Reproduced here so no
 ```
 [ ] doc.go                     — package doc with usage guidelines
 [ ] <tool>.go                  — main implementation
+[ ] options.go                 — Options struct (separate file, matches shell/ layout)
 [ ] <tool>_test.go             — tests
 
 Per-tool struct/function requirements:
@@ -80,10 +81,13 @@ Per-tool struct/function requirements:
 [ ] func Schema() json.RawMessage            — returns bytes.Clone([]byte(schemaJSON))
 [ ] type Tool struct                         — holds configuration
 [ ] func New(...) (*Tool, error)             — constructor with validation
-[ ] func (t *Tool) Run(ctx, args) Result     — core logic
+[ ]   resolveOptions rejects len(opts) > 1 (matches shell.go:129-142 exactly)
+[ ] func (t *Tool) Run(ctx, args) Result     — core logic; check ctx.Err() at top
 [ ] func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error)
 [ ] func (t *Tool) InvokableRun(ctx, argsJSON, ...tool.Option) (string, error)
+[ ]   call jsoncompat.RejectDuplicateTopLevelKeys before json.Unmarshal (both tools)
 [ ] var _ tool.InvokableTool = (*Tool)(nil)  — compile-time interface check
+[ ] var _ interface{ Run(context.Context, Args) Result } = (*Tool)(nil) — second assertion
 
 Docs:
 [ ] docs/inventory/<tool>.md   — inventory entry
