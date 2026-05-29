@@ -15,6 +15,7 @@ agent workers.
   `tracker.CloseWriter`.
 - `trackerwrite`: `tracker_write` tool; v0.1 executes `op=close` through
   `tracker.CloseWriter`.
+- `urlfetch`: `url_fetch` tool; fetches raw text from `file://` or `https://` URLs.
 
 ## Requirements
 
