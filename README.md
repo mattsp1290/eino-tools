@@ -16,6 +16,8 @@ agent workers.
 - `trackerwrite`: `tracker_write` tool; v0.1 executes `op=close` through
   `tracker.CloseWriter`.
 - `urlfetch`: `url_fetch` tool; fetches raw text from `file://` or `https://` URLs.
+- `userinteract`: `user_interact` tool; asks the user a question and returns their
+  answer; works in CLI (blocking stdin) and MCP (non-blocking pending/answer) modes.
 
 ## Requirements
 
