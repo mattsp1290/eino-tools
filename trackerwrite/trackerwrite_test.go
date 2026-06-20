@@ -29,6 +29,31 @@ func (f *fakeCloseWriter) Close(_ context.Context, id, reason string) error {
 	return f.err
 }
 
+type fakeTransitionWriter struct {
+	mu              sync.Mutex
+	closeCalls      int
+	transitionID    string
+	transitionState string
+	transitionErr   error
+	transitionCalls int
+}
+
+func (f *fakeTransitionWriter) Close(_ context.Context, _, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closeCalls++
+	return nil
+}
+
+func (f *fakeTransitionWriter) Transition(_ context.Context, id, toState string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.transitionCalls++
+	f.transitionID = id
+	f.transitionState = toState
+	return f.transitionErr
+}
+
 func TestRunCloseSucceeds(t *testing.T) {
 	t.Parallel()
 
@@ -49,6 +74,29 @@ func TestRunCloseSucceeds(t *testing.T) {
 	}
 }
 
+func TestRunTransitionSucceedsWhenWriterSupportsIt(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeTransitionWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := tool.Run(context.Background(), Args{Op: OpTransition, ID: "T-1", ToState: "accepted"})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("outcome = %q, want succeeded; error=%+v", res.Outcome, res.Error)
+	}
+	if res.Op != OpTransition || res.ID != "T-1" {
+		t.Fatalf("res = %+v", res)
+	}
+	if writer.transitionCalls != 1 || writer.transitionID != "T-1" || writer.transitionState != "accepted" {
+		t.Fatalf("transition = calls:%d id:%q state:%q", writer.transitionCalls, writer.transitionID, writer.transitionState)
+	}
+	if writer.closeCalls != 0 {
+		t.Fatalf("close called %d times", writer.closeCalls)
+	}
+}
+
 func TestUnsupportedOpsDoNotCallWriter(t *testing.T) {
 	t.Parallel()
 
@@ -61,12 +109,101 @@ func TestUnsupportedOpsDoNotCallWriter(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
+			// No toState for transition: capability is checked before shape, so a
+			// close-only writer reports unsupported_op (terminal), not validation.
 			res := tool.Run(context.Background(), Args{Op: op, ID: "T-1"})
 			assertFailureCategory(t, res, ErrCategoryUnsupportedOp)
 			if writer.calls != 0 {
 				t.Fatalf("writer called %d times", writer.calls)
 			}
 		})
+	}
+}
+
+func TestCommentAndLinkPRUnsupportedWithTransitionWriter(t *testing.T) {
+	t.Parallel()
+
+	for _, op := range []Op{OpComment, OpLinkPR} {
+		t.Run(string(op), func(t *testing.T) {
+			t.Parallel()
+
+			writer := &fakeTransitionWriter{}
+			tool, err := New(writer)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			res := tool.Run(context.Background(), Args{Op: op, ID: "T-1"})
+			assertFailureCategory(t, res, ErrCategoryUnsupportedOp)
+			if writer.closeCalls != 0 || writer.transitionCalls != 0 {
+				t.Fatalf("writer called close:%d transition:%d times", writer.closeCalls, writer.transitionCalls)
+			}
+		})
+	}
+}
+
+func TestTransitionOnCloseOnlyWriterIsUnsupportedRegardlessOfToState(t *testing.T) {
+	t.Parallel()
+
+	const wantMsg = `op "transition" is not supported by the configured writer; supported ops: [close]`
+
+	for _, tc := range []struct {
+		name string
+		args Args
+	}{
+		{name: "empty toState", args: Args{Op: OpTransition, ID: "T-1"}},
+		{name: "with toState", args: Args{Op: OpTransition, ID: "T-1", ToState: "accepted"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			writer := &fakeCloseWriter{}
+			tool, err := New(writer)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			res := tool.Run(context.Background(), tc.args)
+			assertFailureCategory(t, res, ErrCategoryUnsupportedOp)
+			if res.Error.Message != wantMsg {
+				t.Fatalf("message = %q, want %q", res.Error.Message, wantMsg)
+			}
+			if writer.calls != 0 {
+				t.Fatalf("writer called %d times", writer.calls)
+			}
+		})
+	}
+}
+
+func TestTransitionWriterStillRoutesClose(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeTransitionWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := tool.Run(context.Background(), Args{Op: OpClose, ID: "T-1", Reason: "done"})
+	if res.Outcome != result.OutcomeSucceeded || res.Op != OpClose {
+		t.Fatalf("res = %+v", res)
+	}
+	if writer.closeCalls != 1 || writer.transitionCalls != 0 {
+		t.Fatalf("writer called close:%d transition:%d", writer.closeCalls, writer.transitionCalls)
+	}
+}
+
+func TestRunTransitionTrimsToState(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeTransitionWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := tool.Run(context.Background(), Args{Op: OpTransition, ID: "T-1", ToState: "  accepted  "})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("outcome = %q, want succeeded; error=%+v", res.Outcome, res.Error)
+	}
+	if writer.transitionState != "accepted" {
+		t.Fatalf("transitionState = %q, want trimmed %q", writer.transitionState, "accepted")
 	}
 }
 
@@ -79,6 +216,13 @@ func TestRunValidationAndContext(t *testing.T) {
 	}
 	assertFailureCategory(t, tool.Run(context.Background(), Args{ID: "T-1"}), ErrCategoryValidation)
 	assertFailureCategory(t, tool.Run(context.Background(), Args{Op: OpClose}), ErrCategoryValidation)
+
+	transitionTool, err := New(&fakeTransitionWriter{})
+	if err != nil {
+		t.Fatalf("New transition: %v", err)
+	}
+	assertFailureCategory(t, transitionTool.Run(context.Background(), Args{Op: OpTransition, ID: "T-1"}), ErrCategoryValidation)
+	assertFailureCategory(t, transitionTool.Run(context.Background(), Args{Op: OpTransition, ID: "T-1", ToState: "   "}), ErrCategoryValidation)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -111,6 +255,32 @@ func TestRunWriterErrors(t *testing.T) {
 	}
 }
 
+func TestRunTransitionWriterErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "deadline", err: context.DeadlineExceeded, want: ErrCategoryTimeout},
+		{name: "canceled", err: context.Canceled, want: ErrCategoryCanceled},
+		{name: "unknown", err: errors.New("boom"), want: ErrCategoryUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tool, err := New(&fakeTransitionWriter{transitionErr: tt.err})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			assertFailureCategory(t, tool.Run(context.Background(), Args{Op: OpTransition, ID: "T-1", ToState: "accepted"}), tt.want)
+		})
+	}
+}
+
 func TestInvokableRun(t *testing.T) {
 	t.Parallel()
 
@@ -138,6 +308,30 @@ func TestInvokableRun(t *testing.T) {
 		t.Fatalf("unmarshal unsupported result: %v", unmarshalErr)
 	}
 	assertFailureCategory(t, got, ErrCategoryUnsupportedOp)
+}
+
+func TestInvokableRunTransition(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeTransitionWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	raw, err := tool.InvokableRun(context.Background(), `{"op":"transition","id":"T-1","toState":"accepted"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var got Result
+	if unmarshalErr := json.Unmarshal([]byte(raw), &got); unmarshalErr != nil {
+		t.Fatalf("unmarshal result: %v", unmarshalErr)
+	}
+	if got.Outcome != result.OutcomeSucceeded || got.Op != OpTransition || got.ID != "T-1" {
+		t.Fatalf("got = %+v", got)
+	}
+	if writer.transitionCalls != 1 || writer.transitionID != "T-1" || writer.transitionState != "accepted" {
+		t.Fatalf("transition = calls:%d id:%q state:%q", writer.transitionCalls, writer.transitionID, writer.transitionState)
+	}
 }
 
 func TestInvokableRunRejectsInvalidJSON(t *testing.T) {
