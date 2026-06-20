@@ -116,7 +116,8 @@ const (
 
 // Tool is the v0.1 tracker_write tool.
 type Tool struct {
-	writer tracker.CloseWriter
+	writer           tracker.CloseWriter
+	transitionWriter tracker.TransitionWriter
 }
 
 // New constructs a Tool.
@@ -124,7 +125,11 @@ func New(w tracker.CloseWriter) (*Tool, error) {
 	if w == nil {
 		return nil, errors.New("tracker_write: CloseWriter is required")
 	}
-	return &Tool{writer: w}, nil
+	t := &Tool{writer: w}
+	if transitionWriter, ok := w.(tracker.TransitionWriter); ok {
+		t.transitionWriter = transitionWriter
+	}
+	return t, nil
 }
 
 const schemaJSON = `{
@@ -134,7 +139,7 @@ const schemaJSON = `{
     "op": {
       "type": "string",
       "enum": ["comment", "transition", "close", "link_pr"],
-      "description": "Discriminator. v1 only implements 'close'; other ops return tool_failed{error.category=unsupported_op}."
+      "description": "Discriminator. v1 implements 'close' and optionally 'transition' when the configured writer supports it; other ops return tool_failed{error.category=unsupported_op}."
     },
     "id": {
       "type": "string",
@@ -149,7 +154,7 @@ const schemaJSON = `{
     "toState": {
       "type": "string",
       "minLength": 1,
-      "description": "Target issue state. Required for op=transition (post-v1)."
+      "description": "Target issue state. Required for op=transition when the configured writer supports transitions."
     },
     "reason": {
       "type": "string",
@@ -199,7 +204,24 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 			Op:      args.Op,
 			ID:      args.ID,
 		}
-	case OpComment, OpTransition, OpLinkPR:
+	case OpTransition:
+		if strings.TrimSpace(args.ToState) == "" {
+			return failedResult(args, ErrCategoryValidation, "toState is required and must be non-empty for op transition")
+		}
+		if t.transitionWriter == nil {
+			return failedResult(args, ErrCategoryUnsupportedOp,
+				fmt.Sprintf("op %q is defined but not implemented by this writer; supported ops: [%s]",
+					args.Op, OpClose))
+		}
+		if err := t.transitionWriter.Transition(ctx, args.ID, args.ToState); err != nil {
+			return failedFromWriterErr(args, err)
+		}
+		return Result{
+			Outcome: result.OutcomeSucceeded,
+			Op:      args.Op,
+			ID:      args.ID,
+		}
+	case OpComment, OpLinkPR:
 		return failedResult(args, ErrCategoryUnsupportedOp,
 			fmt.Sprintf("op %q is defined but not implemented in v1; supported ops: [%s]",
 				args.Op, OpClose))
@@ -217,7 +239,7 @@ func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	}
 	return &schema.ToolInfo{
 		Name:        Name,
-		Desc:        "Mutate the issue tracker. v1 implements op=close (closes the named issue with an optional reason). Other ops (comment, transition, link_pr) return tool_failed{error.category=unsupported_op}.",
+		Desc:        "Mutate the issue tracker. v1 implements op=close and can implement op=transition when the configured writer supports transitions. Unsupported ops return tool_failed{error.category=unsupported_op}.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
 }
