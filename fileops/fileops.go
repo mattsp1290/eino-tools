@@ -29,6 +29,17 @@ const (
 	// MaxOutputBytes caps file_read output and file_write/file_edit input.
 	MaxOutputBytes = 256 * 1024
 
+	// DefaultReadWindowLines is the default line count for line-windowed
+	// file_read calls.
+	DefaultReadWindowLines = 2000
+
+	// MaxReadWindowLines caps line-windowed file_read output.
+	MaxReadWindowLines = 5000
+
+	// MaxReadLineBytes caps one retained line in a line-windowed file_read
+	// result before an inline truncation marker is appended.
+	MaxReadLineBytes = 16 * 1024
+
 	// MaxListEntries caps file_list output.
 	MaxListEntries = 5000
 )
@@ -80,6 +91,7 @@ const (
 	ErrCategoryAnchorNotFound  = "anchor_not_found"
 	ErrCategoryAnchorAmbiguous = "anchor_ambiguous"
 	ErrCategoryTooLarge        = "too_large"
+	ErrCategoryBinary          = "binary"
 	ErrCategoryIO              = "io"
 	ErrCategoryCanceled        = "canceled"
 	ErrCategoryUnknown         = "unknown"

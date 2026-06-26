@@ -217,6 +217,78 @@ func TestRunPathCleaningNormalizes(t *testing.T) {
 	}
 }
 
+func TestRunRichControls(t *testing.T) {
+	t.Parallel()
+
+	tool, root := newTestTool(t)
+	writeFile(t, root, "src/one.go", "before\nNeedle\nAfter\n")
+	writeFile(t, root, "src/two.txt", "before\nNeedle\nAfter\n")
+
+	res := tool.Run(context.Background(), Args{
+		Pattern:    "needle",
+		Glob:       Globs{"**/*.go"},
+		Literal:    true,
+		IgnoreCase: true,
+		Context:    1,
+		Limit:      1,
+	})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, want succeeded (err=%+v)", res.Outcome, res.Error)
+	}
+	if res.MatchCount != 1 || res.Matches[0].Path != "src/one.go" {
+		t.Fatalf("matches = %+v, want one src/one.go match", res.Matches)
+	}
+	if len(res.Matches[0].Submatches) != 0 {
+		t.Fatalf("literal search emitted submatches: %+v", res.Matches[0].Submatches)
+	}
+	if len(res.Matches[0].Before) != 1 || res.Matches[0].Before[0].Line != "before" {
+		t.Fatalf("before context = %+v", res.Matches[0].Before)
+	}
+	if len(res.Matches[0].After) != 1 || res.Matches[0].After[0].Line != "After" {
+		t.Fatalf("after context = %+v", res.Matches[0].After)
+	}
+}
+
+func TestRunLimitTruncates(t *testing.T) {
+	t.Parallel()
+
+	tool, root := newTestTool(t)
+	writeFile(t, root, "a.txt", "needle\n")
+	writeFile(t, root, "b.txt", "needle\n")
+
+	res := tool.Run(context.Background(), Args{Pattern: "needle", Limit: 1})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, want succeeded (err=%+v)", res.Outcome, res.Error)
+	}
+	if !res.Truncated || res.TruncationReason != "matches" || res.MatchCount != 1 {
+		t.Fatalf("truncation = %t/%q count=%d", res.Truncated, res.TruncationReason, res.MatchCount)
+	}
+}
+
+func TestGlobArgumentAcceptsStringOrArray(t *testing.T) {
+	t.Parallel()
+
+	var one struct {
+		Glob Globs `json:"glob"`
+	}
+	if err := json.Unmarshal([]byte(`{"glob":"*.go"}`), &one); err != nil {
+		t.Fatalf("unmarshal string glob: %v", err)
+	}
+	if !slices.Equal(one.Glob, Globs{"*.go"}) {
+		t.Fatalf("string glob = %#v", one.Glob)
+	}
+
+	var many struct {
+		Glob Globs `json:"glob"`
+	}
+	if err := json.Unmarshal([]byte(`{"glob":["*.go","*.md"]}`), &many); err != nil {
+		t.Fatalf("unmarshal array glob: %v", err)
+	}
+	if !slices.Equal(many.Glob, Globs{"*.go", "*.md"}) {
+		t.Fatalf("array glob = %#v", many.Glob)
+	}
+}
+
 func TestSchemaABI(t *testing.T) {
 	t.Parallel()
 
@@ -235,7 +307,7 @@ func TestSchemaABI(t *testing.T) {
 	if got.AdditionalProperties {
 		t.Fatal("additionalProperties = true, want false")
 	}
-	for _, property := range []string{"pattern", "path", "timeout_seconds"} {
+	for _, property := range []string{"pattern", "path", "timeout_seconds", "glob", "literal", "ignore_case", "context", "limit"} {
 		if _, ok := got.Properties[property]; !ok {
 			t.Fatalf("schema missing %q property", property)
 		}

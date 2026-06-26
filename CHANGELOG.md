@@ -4,6 +4,31 @@ This project uses a hand-curated changelog.
 
 ## Unreleased
 
+### Added
+
+- `glob` tool for doublestar path discovery under a workspace, including hidden
+  paths by default while skipping VCS internals.
+- `apply_patch` tool for multi-file add/update/delete/move patches with
+  preflight, context-match verification, duplicate-target rejection, and
+  per-file result summaries.
+- Line-windowed `file_read` via optional `offset` and `limit`, including raw and
+  numbered content, total line metadata, byte/line/long-line truncation signals,
+  and binary-file rejection.
+
+### Changed
+
+- `search` now supports ripgrep glob filters, literal mode, ignore-case mode,
+  context lines, configurable match limits up to 1000, and partial-result
+  metadata while preserving existing calls.
+
+### Migration Notes
+
+- `eino-agent` must serialize workspace filesystem tools per workspace root:
+  `fileops`, `glob`, `search`, and `apply_patch`. Independent workspace roots
+  may run concurrently.
+- `web_search` and LSP/diagnostics schemas remain runtime responsibilities for
+  `eino-agent`, not reusable leaf tools in `eino-tools`.
+
 ## v0.1.0 - Pending
 
 ### Added

@@ -8,7 +8,8 @@ on 2026-05-25.
 - `doc.go`: package contract for workspace-rooted tools and observability boundary.
 - `fileops.go`: shared constants, result envelope, error taxonomy, path helpers,
   duplicate-key guard, workspace validation, Eino `ToolInfo` helper.
-- `read.go`: `file_read`.
+- `read.go`: `file_read`, including legacy prefix reads and optional
+  line-windowed reads.
 - `write.go`: `file_write`.
 - `edit.go`: `file_edit`.
 - `list.go`: `file_list`.
@@ -23,6 +24,9 @@ on 2026-05-25.
   - `NameList = "file_list"`
 - Tunables:
   - `MaxOutputBytes = 256 * 1024`
+  - `DefaultReadWindowLines = 2000`
+  - `MaxReadWindowLines = 5000`
+  - `MaxReadLineBytes = 16 * 1024`
   - `MaxListEntries = 5000`
 - Constructors:
   - `NewReadTool(workspacePath string) (*ReadTool, error)`
@@ -43,7 +47,8 @@ on 2026-05-25.
 
 All schema literals are object schemas with `additionalProperties: false`.
 
-- `file_read`: requires `path`.
+- `file_read`: requires `path`; optional `offset` and `limit` request a
+  line-windowed read. Omitted offset/limit preserve the legacy prefix response.
 - `file_write`: requires `path` and `content`; optional `create_dirs`.
 - `file_edit`: requires `path`, `anchor`, and `replacement`.
 - `file_list`: optional `path` and `recursive`; empty or omitted path lists `"."`.
@@ -60,7 +65,9 @@ the model-facing JSON object. Replace
 
 - `BaseResult`: `Outcome`, `Error`, `IsRetryable()`.
 - `ResultError`: `Category`, `Message`.
-- `ReadResult`: `Path`, `Content`, `ContentBytes`, `Truncated`.
+- `ReadResult`: `Path`, `Content`, `ContentBytes`, `Truncated`,
+  `NumberedContent`, `LineStart`, `LineEnd`, `TotalLines`, `NextOffset`,
+  `LineTruncated`, and `TruncationReason`.
 - `WriteResult`: `Path`, `BytesWritten`, `Created`.
 - `EditResult`: `Path`, `BytesWritten`, `AnchorOccurrences`.
 - `ListEntry`: `Path`, `IsDir`.
@@ -76,6 +83,7 @@ Error category strings to preserve:
 - `anchor_not_found`
 - `anchor_ambiguous`
 - `too_large`
+- `binary`
 - `io`
 - `canceled`
 - `unknown`
@@ -103,8 +111,28 @@ The extraction must move these helpers and their tests as a unit:
 - `atomicWrite` in `write.go`
 
 The current TOCTOU caveat is part of the package contract: safety relies on the
-agent loop running one tool call at a time. Concurrent tool execution would
-require openat-style containment.
+agent loop serializing filesystem tools per workspace root. This includes
+`fileops`, `glob`, `search`, and `apply_patch`. Concurrent tool execution
+against independent workspace roots is allowed; concurrent calls against the
+same workspace would require openat-style containment.
+
+## Line-Windowed Reads
+
+`file_read` remains backward-compatible for calls containing only `path`: it
+returns the leading UTF-8 content prefix capped at `MaxOutputBytes` with the
+legacy `content`, `content_bytes`, and `truncated` fields.
+
+Supplying `offset` and/or `limit` switches to line-window mode:
+
+- `offset` is 1-based and defaults to 1.
+- `limit` defaults to 2000 and caps at 5000.
+- `content` is the raw selected text without line numbers.
+- `numbered_content` prefixes each selected line with `N: `.
+- `line_start`, `line_end`, `total_lines`, `truncated`, and `next_offset`
+  describe the window.
+- `line_truncated` reports long-line truncation; `truncation_reason` is one of
+  `prefix`, `lines`, `bytes`, or `line`.
+- binary or non-UTF-8 files fail with `error.category="binary"`.
 
 ## Tests To Lift
 

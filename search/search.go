@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,6 +32,8 @@ const (
 	DefaultTimeoutSeconds = 60
 	MaxTimeoutSeconds     = 600
 	MaxMatches            = 200
+	MaxSearchLimit        = 1000
+	MaxContextLines       = 20
 	MaxLineBytes          = 4 * 1024
 	MaxResultBytes        = 256 * 1024
 	MaxStderrBytes        = 4 * 1024
@@ -45,6 +48,28 @@ type Args struct {
 	Pattern        string `json:"pattern"`
 	Path           string `json:"path,omitempty"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	Glob           Globs  `json:"glob,omitempty"`
+	Literal        bool   `json:"literal,omitempty"`
+	IgnoreCase     bool   `json:"ignore_case,omitempty"`
+	Context        int    `json:"context,omitempty"`
+	Limit          int    `json:"limit,omitempty"`
+}
+
+// Globs accepts either a single JSON string or an array of strings.
+type Globs []string
+
+func (g *Globs) UnmarshalJSON(raw []byte) error {
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		*g = Globs{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return err
+	}
+	*g = Globs(many)
+	return nil
 }
 
 // Result is the structured envelope returned to the model.
@@ -56,6 +81,7 @@ type Result struct {
 	TruncationReason string          `json:"truncation_reason,omitempty"`
 	DurationMS       int64           `json:"duration_ms"`
 	TimedOut         bool            `json:"timed_out,omitempty"`
+	Partial          bool            `json:"partial,omitempty"`
 	Error            *ResultError    `json:"error,omitempty"`
 	RawJSON          json.RawMessage `json:"-"`
 }
@@ -74,11 +100,20 @@ func (r *Result) UnmarshalJSON(raw []byte) error {
 
 // Match is one ripgrep match event after line/submatch normalization.
 type Match struct {
-	Path          string     `json:"path"`
-	LineNumber    int        `json:"line_number"`
-	Line          string     `json:"line"`
-	LineTruncated bool       `json:"line_truncated,omitempty"`
-	Submatches    []Submatch `json:"submatches,omitempty"`
+	Path          string        `json:"path"`
+	LineNumber    int           `json:"line_number"`
+	Line          string        `json:"line"`
+	LineTruncated bool          `json:"line_truncated,omitempty"`
+	Submatches    []Submatch    `json:"submatches,omitempty"`
+	Before        []ContextLine `json:"before,omitempty"`
+	After         []ContextLine `json:"after,omitempty"`
+}
+
+// ContextLine is one before/after context line around a match.
+type ContextLine struct {
+	LineNumber    int    `json:"line_number"`
+	Line          string `json:"line"`
+	LineTruncated bool   `json:"line_truncated,omitempty"`
 }
 
 // Submatch is a regex span within a matched line.
@@ -160,6 +195,33 @@ const schemaJSON = `{
       "minimum": 0,
       "maximum": 600,
       "description": "Per-call timeout in seconds. 0 or omitted applies the default (60s). Cap is 600s."
+    },
+    "glob": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1}
+      ],
+      "description": "Optional ripgrep include glob or globs, forwarded as repeated -g filters."
+    },
+    "literal": {
+      "type": "boolean",
+      "description": "If true, search for pattern as a fixed string via ripgrep -F. Default false."
+    },
+    "ignore_case": {
+      "type": "boolean",
+      "description": "If true, search case-insensitively via ripgrep -i. Default false."
+    },
+    "context": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20,
+      "description": "Number of before and after context lines to return. Default 0; cap is 20."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "description": "Maximum matches to return. Default 200; cap is 1000."
     }
   },
   "required": ["pattern"]
@@ -190,6 +252,34 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 		return failedResult(ErrCategoryValidation,
 			fmt.Sprintf("timeout_seconds %d exceeds maximum %d", args.TimeoutSeconds, MaxTimeoutSeconds), start)
 	}
+	if args.Context < 0 {
+		return failedResult(ErrCategoryValidation,
+			fmt.Sprintf("context must be non-negative, got %d", args.Context), start)
+	}
+	if args.Context > MaxContextLines {
+		return failedResult(ErrCategoryValidation,
+			fmt.Sprintf("context %d exceeds maximum %d", args.Context, MaxContextLines), start)
+	}
+	limit := args.Limit
+	if limit == 0 {
+		limit = MaxMatches
+	}
+	if limit < 0 {
+		return failedResult(ErrCategoryValidation,
+			fmt.Sprintf("limit must be non-negative, got %d", args.Limit), start)
+	}
+	if limit > MaxSearchLimit {
+		return failedResult(ErrCategoryValidation,
+			fmt.Sprintf("limit %d exceeds maximum %d", args.Limit, MaxSearchLimit), start)
+	}
+	for _, glob := range args.Glob {
+		if strings.TrimSpace(glob) == "" {
+			return failedResult(ErrCategoryValidation, "glob entries must be non-empty", start)
+		}
+		if strings.ContainsRune(glob, 0) {
+			return failedResult(ErrCategoryValidation, "glob contains NUL byte", start)
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return failedResult(ErrCategoryCanceled, err.Error(), start)
 	}
@@ -212,10 +302,25 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	runCtx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 
-	// gosec G204: ripgrep execution is intentional. Pattern and path are
-	// passed as separate argv entries with -e/-- boundaries; workspace
+	rgArgs := []string{"--json"}
+	if args.Literal {
+		rgArgs = append(rgArgs, "-F")
+	}
+	if args.IgnoreCase {
+		rgArgs = append(rgArgs, "-i")
+	}
+	if args.Context > 0 {
+		rgArgs = append(rgArgs, "-C", strconv.Itoa(args.Context))
+	}
+	for _, glob := range args.Glob {
+		rgArgs = append(rgArgs, "-g", glob)
+	}
+	rgArgs = append(rgArgs, "-e", args.Pattern, "--", rel)
+
+	// gosec G204: ripgrep execution is intentional. Pattern, globs, and path
+	// are passed as separate argv entries with -e/-g/-- boundaries; workspace
 	// containment is enforced by resolveExisting before exec.
-	cmd := exec.CommandContext(runCtx, t.rgBinary, "--json", "-e", args.Pattern, "--", rel) //nolint:gosec
+	cmd := exec.CommandContext(runCtx, t.rgBinary, rgArgs...) //nolint:gosec
 	cmd.Dir = t.workspacePath
 	cmd.Stdin = bytes.NewReader(nil)
 	cmd.WaitDelay = waitDelayAfterCancel
@@ -235,7 +340,10 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 		return failedResult(ErrCategoryExecFailed, fmt.Sprintf("rg start: %v", err), start)
 	}
 
-	matches, truncated, truncReason, parseErr := parseStream(stdoutPipe)
+	matches, truncated, truncReason, parseErr := parseStream(stdoutPipe, parseOptions{
+		limit:             limit,
+		includeSubmatches: !args.Literal,
+	})
 	if truncated || parseErr != nil {
 		cancel()
 		_, _ = io.Copy(io.Discard, stdoutPipe)
@@ -290,10 +398,22 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 		res.Outcome = result.OutcomeSucceeded
 		return res
 	case exitCode == 2:
+		if len(matches) > 0 {
+			res.Outcome = result.OutcomeSucceeded
+			res.Partial = true
+			res.Error = &ResultError{Category: ErrCategoryExecFailed, Message: rgErrorMessage(stderrBuf, waitErr)}
+			return res
+		}
 		res.Outcome = result.OutcomeFailed
 		res.Error = &ResultError{Category: ErrCategoryInvalidPattern, Message: rgErrorMessage(stderrBuf, waitErr)}
 		return res
 	default:
+		if len(matches) > 0 {
+			res.Outcome = result.OutcomeSucceeded
+			res.Partial = true
+			res.Error = &ResultError{Category: ErrCategoryExecFailed, Message: rgErrorMessage(stderrBuf, waitErr)}
+			return res
+		}
 		res.Outcome = result.OutcomeFailed
 		res.Error = &ResultError{
 			Category: ErrCategoryExecFailed,
@@ -312,7 +432,7 @@ func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	}
 	return &schema.ToolInfo{
 		Name:        Name,
-		Desc:        "Search workspace files via ripgrep. Forwards the regex pattern to 'rg -e'; inline flags such as (?i) are supported. Optional path narrows the search root. Per-call timeout defaults to 60s and is capped at 600s.",
+		Desc:        "Search workspace files via ripgrep. Defaults to regex mode and preserves existing pattern/path/timeout behavior. Optional glob filters, literal mode, ignore-case mode, context lines, and match limit are supported. Per-call timeout defaults to 60s and is capped at 600s.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
 }
@@ -378,11 +498,21 @@ func (t rgText) decode() string {
 	return ""
 }
 
-func parseStream(r io.Reader) ([]Match, bool, string, error) {
+type parseOptions struct {
+	limit             int
+	includeSubmatches bool
+}
+
+func parseStream(r io.Reader, opts parseOptions) ([]Match, bool, string, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), scannerLineCap)
 
-	matches := make([]Match, 0, MaxMatches)
+	if opts.limit <= 0 {
+		opts.limit = MaxMatches
+	}
+	matches := make([]Match, 0, min(opts.limit, MaxMatches))
+	pendingBefore := make([]ContextLine, 0)
+	lastMatchIndex := -1
 	bytesUsed := 0
 
 	for scanner.Scan() {
@@ -394,7 +524,9 @@ func parseStream(r io.Reader) ([]Match, bool, string, error) {
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
-		if ev.Type != "match" {
+		if ev.Type == "begin" || ev.Type == "end" {
+			pendingBefore = pendingBefore[:0]
+			lastMatchIndex = -1
 			continue
 		}
 		var data rgMatchData
@@ -402,15 +534,36 @@ func parseStream(r io.Reader) ([]Match, bool, string, error) {
 			continue
 		}
 
-		m := buildMatch(data)
-		matches = append(matches, m)
-		bytesUsed += len(m.Line)
+		switch ev.Type {
+		case "match":
+			if len(matches) >= opts.limit {
+				return matches, true, "matches", nil
+			}
+			m := buildMatch(data, opts.includeSubmatches)
+			if len(pendingBefore) > 0 {
+				m.Before = append(m.Before, pendingBefore...)
+				pendingBefore = pendingBefore[:0]
+			}
+			matches = append(matches, m)
+			lastMatchIndex = len(matches) - 1
+			bytesUsed += len(m.Line)
 
-		if len(matches) >= MaxMatches {
-			return matches, true, "matches", nil
-		}
-		if bytesUsed >= MaxResultBytes {
-			return matches, true, "bytes", nil
+			if bytesUsed >= MaxResultBytes {
+				return matches, true, "bytes", nil
+			}
+		case "context":
+			ctxLine := buildContextLine(data)
+			if lastMatchIndex >= 0 && len(matches) > 0 {
+				matches[lastMatchIndex].After = append(matches[lastMatchIndex].After, ctxLine)
+			} else {
+				pendingBefore = append(pendingBefore, ctxLine)
+			}
+			bytesUsed += len(ctxLine.Line)
+			if bytesUsed >= MaxResultBytes {
+				return matches, true, "bytes", nil
+			}
+		default:
+			continue
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -422,36 +575,25 @@ func parseStream(r io.Reader) ([]Match, bool, string, error) {
 	return matches, false, "", nil
 }
 
-func buildMatch(d rgMatchData) Match {
+func buildMatch(d rgMatchData, includeSubmatches bool) Match {
 	path := strings.TrimPrefix(d.Path.decode(), "./")
-	line := strings.TrimRight(d.Lines.decode(), "\n")
-
-	truncated := false
-	if len(line) > MaxLineBytes {
-		end := MaxLineBytes
-		for steps := 0; end > 0 && steps < utf8.UTFMax-1; steps++ {
-			if utf8.RuneStart(line[end]) {
-				break
-			}
-			end--
-		}
-		line = line[:end]
-		truncated = true
-	}
+	line, truncated := truncateLine(strings.TrimRight(d.Lines.decode(), "\n"))
 
 	subs := make([]Submatch, 0, len(d.Submatches))
-	for _, s := range d.Submatches {
-		if truncated && s.End > len(line) {
-			continue
+	if includeSubmatches {
+		for _, s := range d.Submatches {
+			if truncated && s.End > len(line) {
+				continue
+			}
+			if s.Start < 0 || s.End < s.Start || s.End > len(line) {
+				continue
+			}
+			subs = append(subs, Submatch{
+				Text:  s.Match.decode(),
+				Start: s.Start,
+				End:   s.End,
+			})
 		}
-		if s.Start < 0 || s.End < s.Start || s.End > len(line) {
-			continue
-		}
-		subs = append(subs, Submatch{
-			Text:  s.Match.decode(),
-			Start: s.Start,
-			End:   s.End,
-		})
 	}
 
 	return Match{
@@ -461,6 +603,29 @@ func buildMatch(d rgMatchData) Match {
 		LineTruncated: truncated,
 		Submatches:    subs,
 	}
+}
+
+func buildContextLine(d rgMatchData) ContextLine {
+	line, truncated := truncateLine(strings.TrimRight(d.Lines.decode(), "\n"))
+	return ContextLine{
+		LineNumber:    d.LineNumber,
+		Line:          line,
+		LineTruncated: truncated,
+	}
+}
+
+func truncateLine(line string) (string, bool) {
+	if len(line) <= MaxLineBytes {
+		return line, false
+	}
+	end := MaxLineBytes
+	for steps := 0; end > 0 && steps < utf8.UTFMax-1; steps++ {
+		if utf8.RuneStart(line[end]) {
+			break
+		}
+		end--
+	}
+	return line[:end], true
 }
 
 type pathErr struct {

@@ -18,7 +18,7 @@ func TestFileopsSchemaABI(t *testing.T) {
 		properties []string
 		required   []string
 	}{
-		{name: NameRead, schema: ReadSchema(), properties: []string{"path"}, required: []string{"path"}},
+		{name: NameRead, schema: ReadSchema(), properties: []string{"path", "offset", "limit"}, required: []string{"path"}},
 		{name: NameWrite, schema: WriteSchema(), properties: []string{"path", "content", "create_dirs"}, required: []string{"path", "content"}},
 		{name: NameEdit, schema: EditSchema(), properties: []string{"path", "anchor", "replacement"}, required: []string{"path", "anchor", "replacement"}},
 		{name: NameList, schema: ListSchema(), properties: []string{"path", "recursive"}},
