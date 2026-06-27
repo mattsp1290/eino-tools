@@ -382,14 +382,14 @@ func (t *Tool) preflight(ctx context.Context, parsed parsedPatch) ([]plannedChan
 			for _, h := range op.hunks {
 				oldText := linesToText(h.oldLines)
 				newText := linesToText(h.newLines)
-				count := strings.Count(content, oldText)
-				switch count {
+				positions := lineAnchoredMatches(content, oldText)
+				switch len(positions) {
 				case 0:
 					return nil, fileResults, &ResultError{Category: ErrCategoryConflict, Message: fmt.Sprintf("context did not match in %s", op.path)}
 				case 1:
-					content = strings.Replace(content, oldText, newText, 1)
+					content = content[:positions[0]] + newText + content[positions[0]+len(oldText):]
 				default:
-					return nil, fileResults, &ResultError{Category: ErrCategoryConflict, Message: fmt.Sprintf("context matched %d times in %s; add more context", count, op.path)}
+					return nil, fileResults, &ResultError{Category: ErrCategoryConflict, Message: fmt.Sprintf("context matched %d times in %s; add more context", len(positions), op.path)}
 				}
 			}
 			dst := src
@@ -501,13 +501,16 @@ func (t *Tool) readTextFile(rel string) (string, os.FileInfo, []byte, string, *R
 }
 
 func (t *Tool) statExistingFile(rel string) (string, os.FileInfo, *ResultError) {
-	resolved, perr := resolveExisting(t.workspacePath, rel)
+	resolved, perr := resolveSyntacticExisting(t.workspacePath, rel)
 	if perr != nil {
 		return "", nil, &ResultError{Category: perr.category, Message: perr.message}
 	}
-	info, err := os.Stat(resolved)
+	info, err := os.Lstat(resolved)
 	if err != nil {
 		return "", nil, &ResultError{Category: ErrCategoryIO, Message: fmt.Sprintf("stat %q: %v", rel, err)}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", nil, &ResultError{Category: ErrCategoryUnsupported, Message: fmt.Sprintf("path %q is a symlink; apply_patch update/delete sources must be regular files", rel)}
 	}
 	if info.IsDir() {
 		return "", nil, &ResultError{Category: ErrCategoryIsDirectory, Message: fmt.Sprintf("path %q is a directory", rel)}
@@ -556,6 +559,25 @@ func linesToText(lines []string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
+func lineAnchoredMatches(content, needle string) []int {
+	if needle == "" {
+		return nil
+	}
+	var positions []int
+	searchFrom := 0
+	for {
+		idx := strings.Index(content[searchFrom:], needle)
+		if idx < 0 {
+			return positions
+		}
+		idx += searchFrom
+		if idx == 0 || content[idx-1] == '\n' {
+			positions = append(positions, idx)
+		}
+		searchFrom = idx + 1
+	}
+}
+
 func resultPath(op fileOp) string {
 	if op.newPath != "" {
 		return op.newPath
@@ -587,22 +609,28 @@ func validateRelPath(rel string) *pathErr {
 	return nil
 }
 
-func resolveExisting(workspacePath, rel string) (string, *pathErr) {
+func resolveSyntacticExisting(workspacePath, rel string) (string, *pathErr) {
 	if perr := validateRelPath(rel); perr != nil {
 		return "", perr
 	}
-	candidate := filepath.Join(workspacePath, rel)
-	resolved, err := filepath.EvalSymlinks(candidate)
-	if err != nil {
+	candidate := filepath.Clean(filepath.Join(workspacePath, rel))
+	if !syntacticDescendant(workspacePath, candidate) {
+		return "", newPathErr(ErrCategoryPathEscape, "path %q resolves outside workspace", rel)
+	}
+	if _, err := os.Lstat(candidate); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", newPathErr(ErrCategoryNotFound, "path does not exist: %s", rel)
 		}
+		return "", newPathErr(ErrCategoryUnknown, "stat path %q: %v", rel, err)
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
 		return "", newPathErr(ErrCategoryUnknown, "resolve path %q: %v", rel, err)
 	}
 	if !isDescendant(workspacePath, resolved, false) {
 		return "", newPathErr(ErrCategoryPathEscape, "path %q resolves outside workspace", rel)
 	}
-	return resolved, nil
+	return candidate, nil
 }
 
 func resolveWritable(workspacePath, rel string) (string, *pathErr) {

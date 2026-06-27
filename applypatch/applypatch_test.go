@@ -118,6 +118,29 @@ func TestRunPreflightRejectsAndDoesNotWrite(t *testing.T) {
 	}
 }
 
+func TestRunRejectsLineHunkSuffixMatch(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFixture(t, root, "target.txt", "prefixfoo\n")
+	tool, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	patch := `*** Begin Patch
+*** Update File: target.txt
+@@
+-foo
++bar
+*** End Patch
+`
+	res := tool.Run(context.Background(), Args{PatchText: patch})
+	assertCategory(t, res, ErrCategoryConflict)
+	if readFixture(t, root, "target.txt") != "prefixfoo\n" {
+		t.Fatalf("target changed despite non-line-anchored context")
+	}
+}
+
 func TestRunRejectsDuplicateTargetsAndPathEscapes(t *testing.T) {
 	t.Parallel()
 
@@ -174,6 +197,35 @@ func TestRunRejectsExistingAddMissingUpdateAndMissingDelete(t *testing.T) {
 *** End Patch
 `
 	assertCategory(t, tool.Run(context.Background(), Args{PatchText: missingDelete}), ErrCategoryNotFound)
+}
+
+func TestRunRejectsSymlinkDeleteSourceWithoutRemovingTarget(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFixture(t, root, "real.txt", "real\n")
+	if err := os.Symlink(filepath.Join(root, "real.txt"), filepath.Join(root, "link.txt")); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		t.Fatalf("Symlink: %v", err)
+	}
+	tool, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	patch := `*** Begin Patch
+*** Delete File: link.txt
+*** End Patch
+`
+	res := tool.Run(context.Background(), Args{PatchText: patch})
+	assertCategory(t, res, ErrCategoryUnsupported)
+	if readFixture(t, root, "real.txt") != "real\n" {
+		t.Fatalf("real target changed")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "link.txt")); err != nil {
+		t.Fatalf("link was removed despite rejection: %v", err)
+	}
 }
 
 func TestRunDeletesBinaryFile(t *testing.T) {

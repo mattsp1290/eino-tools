@@ -66,6 +66,8 @@ Before any write starts, `apply_patch`:
 - rejects missing update/delete sources;
 - rejects existing add/move targets;
 - rejects directory update/delete targets;
+- rejects symlink update/delete sources, even when they point inside the
+  workspace, so commit never removes a different path than the requested target;
 - rejects binary or non-UTF-8 update sources;
 - verifies every update hunk context matches exactly once after prior hunks for
   that file.

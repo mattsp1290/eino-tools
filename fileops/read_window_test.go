@@ -104,6 +104,59 @@ func TestReadLineWindowLongLineAndByteCaps(t *testing.T) {
 	}
 }
 
+func TestReadLineWindowDoesNotReturnPartialByteCapLine(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	line := strings.Repeat("a", 100) + "\n"
+	var first strings.Builder
+	for first.Len()+len(line) <= MaxOutputBytes {
+		first.WriteString(line)
+	}
+	second := strings.Repeat("b", 100) + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "cap.txt"), []byte(first.String()+second), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	read := mustNewReadTool(t, workspace)
+	offset := 1
+	limit := MaxReadWindowLines
+
+	res := read.Run(context.Background(), ReadArgs{Path: "cap.txt", Offset: &offset, Limit: &limit})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, err=%+v", res.Outcome, res.Error)
+	}
+	if res.Content != first.String() {
+		t.Fatalf("Content contains partial second line or missed first line: len=%d", len(res.Content))
+	}
+	if strings.Contains(res.NumberedContent, strings.Repeat("b", 20)) {
+		t.Fatalf("NumberedContent contains partial overflow line: %q", res.NumberedContent[len(res.NumberedContent)-32:])
+	}
+	if !res.Truncated || res.TruncationReason != "bytes" || res.LineEnd == 0 || res.NextOffset != res.LineEnd+1 {
+		t.Fatalf("metadata = truncated %t reason %q lineEnd %d next %d", res.Truncated, res.TruncationReason, res.LineEnd, res.NextOffset)
+	}
+}
+
+func TestReadLineWindowIgnoresSkippedLongLineTruncation(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	longLine := strings.Repeat("x", MaxReadLineBytes+32) + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "skip.txt"), []byte(longLine+"selected\n"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	read := mustNewReadTool(t, workspace)
+	offset := 2
+	limit := 1
+
+	res := read.Run(context.Background(), ReadArgs{Path: "skip.txt", Offset: &offset, Limit: &limit})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, err=%+v", res.Outcome, res.Error)
+	}
+	if res.Content != "selected\n" || res.LineTruncated || res.TruncationReason != "" || res.Truncated {
+		t.Fatalf("unexpected skipped-line truncation metadata: %+v", res)
+	}
+}
+
 func TestReadBinaryFails(t *testing.T) {
 	t.Parallel()
 

@@ -293,27 +293,19 @@ func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved st
 					Path: args.Path,
 				}
 			}
-			retained, wasLineTruncated := truncateReadLine(line)
-			if wasLineTruncated {
-				lineTruncated = true
-				if truncReason == "" {
-					truncReason = "line"
-				}
-			}
 			if totalLines >= offset && totalLines < offset+limit && !byteCapHit {
+				retained, wasLineTruncated := truncateReadLine(line)
 				if contentBytes+len(retained) > MaxOutputBytes {
-					remaining := MaxOutputBytes - contentBytes
-					if remaining > 0 {
-						retained = trimUTF8(retained[:remaining])
-						content.WriteString(retained)
-						numbered.WriteString(fmt.Sprintf("%d: %s", totalLines, retained))
-						contentBytes += len(retained)
-						lineEnd = totalLines
-					}
 					byteCapHit = true
 					truncated = true
 					truncReason = "bytes"
 				} else {
+					if wasLineTruncated {
+						lineTruncated = true
+						if truncReason == "" {
+							truncReason = "line"
+						}
+					}
 					content.WriteString(retained)
 					numbered.WriteString(fmt.Sprintf("%d: %s", totalLines, retained))
 					contentBytes += len(retained)

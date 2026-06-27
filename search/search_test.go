@@ -249,6 +249,33 @@ func TestRunRichControls(t *testing.T) {
 	}
 }
 
+func TestRunContextLinesAttachToNearestMatchSide(t *testing.T) {
+	t.Parallel()
+
+	tool, root := newTestTool(t)
+	writeFile(t, root, "ctx.txt", "match one\nafter one\ngap\nbefore two\nmatch two\n")
+
+	res := tool.Run(context.Background(), Args{Pattern: "match", Path: "ctx.txt", Context: 1})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, want succeeded (err=%+v)", res.Outcome, res.Error)
+	}
+	if res.MatchCount != 2 {
+		t.Fatalf("MatchCount = %d, want 2: %+v", res.MatchCount, res.Matches)
+	}
+	if len(res.Matches[0].After) != 1 || res.Matches[0].After[0].Line != "after one" {
+		t.Fatalf("first after context = %+v", res.Matches[0].After)
+	}
+	if len(res.Matches[0].Before) != 0 {
+		t.Fatalf("first before context = %+v", res.Matches[0].Before)
+	}
+	if len(res.Matches[1].Before) != 1 || res.Matches[1].Before[0].Line != "before two" {
+		t.Fatalf("second before context = %+v", res.Matches[1].Before)
+	}
+	if len(res.Matches[1].After) != 0 {
+		t.Fatalf("second after context = %+v", res.Matches[1].After)
+	}
+}
+
 func TestRunLimitTruncates(t *testing.T) {
 	t.Parallel()
 

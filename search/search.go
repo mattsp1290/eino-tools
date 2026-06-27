@@ -343,6 +343,7 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	matches, truncated, truncReason, parseErr := parseStream(stdoutPipe, parseOptions{
 		limit:             limit,
 		includeSubmatches: !args.Literal,
+		contextLines:      args.Context,
 	})
 	if truncated || parseErr != nil {
 		cancel()
@@ -501,6 +502,7 @@ func (t rgText) decode() string {
 type parseOptions struct {
 	limit             int
 	includeSubmatches bool
+	contextLines      int
 }
 
 func parseStream(r io.Reader, opts parseOptions) ([]Match, bool, string, error) {
@@ -511,7 +513,7 @@ func parseStream(r io.Reader, opts parseOptions) ([]Match, bool, string, error) 
 		opts.limit = MaxMatches
 	}
 	matches := make([]Match, 0, min(opts.limit, MaxMatches))
-	pendingBefore := make([]ContextLine, 0)
+	pendingContext := make([]ContextLine, 0)
 	lastMatchIndex := -1
 	bytesUsed := 0
 
@@ -525,7 +527,10 @@ func parseStream(r io.Reader, opts parseOptions) ([]Match, bool, string, error) 
 			continue
 		}
 		if ev.Type == "begin" || ev.Type == "end" {
-			pendingBefore = pendingBefore[:0]
+			if ev.Type == "end" && lastMatchIndex >= 0 {
+				attachTrailingContext(matches, lastMatchIndex, pendingContext, opts.contextLines)
+			}
+			pendingContext = pendingContext[:0]
 			lastMatchIndex = -1
 			continue
 		}
@@ -540,9 +545,13 @@ func parseStream(r io.Reader, opts parseOptions) ([]Match, bool, string, error) 
 				return matches, true, "matches", nil
 			}
 			m := buildMatch(data, opts.includeSubmatches)
-			if len(pendingBefore) > 0 {
-				m.Before = append(m.Before, pendingBefore...)
-				pendingBefore = pendingBefore[:0]
+			if len(pendingContext) > 0 {
+				if lastMatchIndex >= 0 {
+					attachBetweenMatches(matches, lastMatchIndex, &m, pendingContext, opts.contextLines)
+				} else {
+					m.Before = append(m.Before, pendingContext...)
+				}
+				pendingContext = pendingContext[:0]
 			}
 			matches = append(matches, m)
 			lastMatchIndex = len(matches) - 1
@@ -553,11 +562,7 @@ func parseStream(r io.Reader, opts parseOptions) ([]Match, bool, string, error) 
 			}
 		case "context":
 			ctxLine := buildContextLine(data)
-			if lastMatchIndex >= 0 && len(matches) > 0 {
-				matches[lastMatchIndex].After = append(matches[lastMatchIndex].After, ctxLine)
-			} else {
-				pendingBefore = append(pendingBefore, ctxLine)
-			}
+			pendingContext = append(pendingContext, ctxLine)
 			bytesUsed += len(ctxLine.Line)
 			if bytesUsed >= MaxResultBytes {
 				return matches, true, "bytes", nil
@@ -573,6 +578,37 @@ func parseStream(r io.Reader, opts parseOptions) ([]Match, bool, string, error) 
 		return matches, false, "", err
 	}
 	return matches, false, "", nil
+}
+
+func attachBetweenMatches(matches []Match, lastMatchIndex int, current *Match, context []ContextLine, contextLines int) {
+	previousLine := matches[lastMatchIndex].LineNumber
+	for _, line := range context {
+		attached := false
+		if contextLines > 0 && line.LineNumber <= previousLine+contextLines {
+			matches[lastMatchIndex].After = append(matches[lastMatchIndex].After, line)
+			attached = true
+		}
+		if contextLines > 0 && line.LineNumber >= current.LineNumber-contextLines {
+			current.Before = append(current.Before, line)
+			attached = true
+		}
+		if !attached {
+			if line.LineNumber < current.LineNumber {
+				current.Before = append(current.Before, line)
+			} else {
+				matches[lastMatchIndex].After = append(matches[lastMatchIndex].After, line)
+			}
+		}
+	}
+}
+
+func attachTrailingContext(matches []Match, lastMatchIndex int, context []ContextLine, contextLines int) {
+	previousLine := matches[lastMatchIndex].LineNumber
+	for _, line := range context {
+		if contextLines == 0 || line.LineNumber <= previousLine+contextLines {
+			matches[lastMatchIndex].After = append(matches[lastMatchIndex].After, line)
+		}
+	}
 }
 
 func buildMatch(d rgMatchData, includeSubmatches bool) Match {
