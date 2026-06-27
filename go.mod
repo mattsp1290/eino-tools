@@ -3,6 +3,7 @@ module github.com/mattsp1290/eino-tools
 go 1.26
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/cloudwego/eino v0.8.13
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/mattsp1290/beads-go v0.1.0

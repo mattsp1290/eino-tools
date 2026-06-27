@@ -1,7 +1,7 @@
 # Search extraction inventory
 
 Source inspected: `/home/infra-admin/git/local-symphony/internal/worker/tools/search`
-on 2026-05-25.
+on 2026-05-25. Coding-agent parity extensions were added on 2026-06-26.
 
 ## Files
 
@@ -22,6 +22,8 @@ on 2026-05-25.
   - `DefaultTimeoutSeconds = 60`
   - `MaxTimeoutSeconds = 600`
   - `MaxMatches = 200`
+  - `MaxSearchLimit = 1000`
+  - `MaxContextLines = 20`
   - `MaxLineBytes = 4 * 1024`
   - `MaxResultBytes = 256 * 1024`
   - `MaxStderrBytes = 4 * 1024`
@@ -46,6 +48,13 @@ Properties:
 - `pattern`: string, `minLength: 1`.
 - `path`: optional string. Empty or omitted searches the workspace root.
 - `timeout_seconds`: integer, `minimum: 0`, `maximum: 600`.
+- `glob`: optional string or string array. Forwarded as repeated `rg -g`
+  include filters.
+- `literal`: optional boolean. When true, uses `rg -F`.
+- `ignore_case`: optional boolean. When true, uses `rg -i`.
+- `context`: optional integer, `minimum: 0`, `maximum: 20`. Uses `rg -C`.
+- `limit`: optional integer, `minimum: 1`, `maximum: 1000`. Default remains
+  `MaxMatches` (200) for backward compatibility.
 
 `timeout_seconds` omitted or zero uses the 60 second default. The runtime keeps
 defense-in-depth checks for negative and above-cap values.
@@ -55,13 +64,15 @@ defense-in-depth checks for negative and above-cap values.
 The tool runs ripgrep as:
 
 ```text
-rg --json -e <pattern> -- <path>
+rg --json [flags] -e <pattern> -- <path>
 ```
 
 Execution details:
 
 - `cmd.Dir` is the resolved workspace root.
 - `<path>` is workspace-relative and defaults to `"."`.
+- `literal`, `ignore_case`, `context`, and `glob` map to `-F`, `-i`, `-C`, and
+  repeated `-g` flags respectively.
 - `-e` prevents patterns beginning with `-` from being interpreted as flags.
 - `--` prevents paths beginning with `-` from being interpreted as flags.
 - `stdin` is an empty reader.
@@ -98,6 +109,7 @@ is stripped so returned paths compose with `file_read` and `file_edit`.
 - `TruncationReason`
 - `DurationMS`
 - `TimedOut`
+- `Partial`
 - `Error`
 
 `Match` fields:
@@ -107,6 +119,14 @@ is stripped so returned paths compose with `file_read` and `file_edit`.
 - `Line`
 - `LineTruncated`
 - `Submatches []Submatch`
+- `Before []ContextLine`
+- `After []ContextLine`
+
+`ContextLine` fields:
+
+- `LineNumber`
+- `Line`
+- `LineTruncated`
 
 `Submatch` fields:
 
@@ -140,8 +160,12 @@ Retryable result categories:
 - Ripgrep exit 0 -> `outcome=succeeded`.
 - Ripgrep exit 1 -> `outcome=succeeded` with an empty `matches` slice and
   `match_count=0`.
-- Ripgrep exit 2 -> `outcome=failed`, `error.category=invalid_pattern`.
-- Unexpected non-zero exit -> `outcome=failed`, `error.category=exec_failed`.
+- Ripgrep exit 2 -> `outcome=failed`, `error.category=invalid_pattern` when no
+  useful matches were parsed.
+- Ripgrep exit 2 or unexpected non-zero with parsed matches ->
+  `outcome=succeeded`, `partial=true`, and `error.category=exec_failed`.
+- Unexpected non-zero with no parsed matches -> `outcome=failed`,
+  `error.category=exec_failed`.
 - Cap-driven cancellation after enough useful matches were parsed is
   reclassified as success with `truncated=true`, even if ripgrep exits non-zero
   due to cancellation.
@@ -154,19 +178,20 @@ Retryable result categories:
 Ripgrep stdout is parsed as NDJSON through `bufio.Scanner` with an 8 MiB
 per-line scanner cap.
 
-Only `match` events are consumed. Non-match events and malformed match lines are
-skipped defensively. A scanner overflow returns `unknown`.
+`match` and `context` events are consumed. Other events and malformed match
+lines are skipped defensively. A scanner overflow returns `unknown`.
 
 Parsing stops when:
 
-- `len(matches) >= MaxMatches`, producing `truncated=true` and
-  `truncation_reason="matches"`.
-- cumulative retained `matches[].line` bytes reach `MaxResultBytes`, producing
-  `truncated=true` and `truncation_reason="bytes"`.
+- another match would exceed the effective `limit`, producing `truncated=true`
+  and `truncation_reason="matches"`.
+- cumulative retained match and context line bytes reach `MaxResultBytes`,
+  producing `truncated=true` and `truncation_reason="bytes"`.
 
 Each matched line is capped at `MaxLineBytes`; trimmed lines set
 `line_truncated=true`. Submatches whose offsets no longer fit inside a
-truncated line are dropped.
+truncated line are dropped. Literal mode omits regex submatches from the
+model-facing result.
 
 For non-UTF-8 files, ripgrep emits base64 `bytes`; the wrapper decodes those and
 uses `strings.ToValidUTF8(..., "�")` for printable model-facing text.
