@@ -17,6 +17,9 @@ This project uses a hand-curated changelog.
 - Optional `tracker.TransitionWriter` support so `trackerwrite` can execute
   `op=transition` when the configured writer implements transitions, while
   close-only writers continue to receive `unsupported_op`.
+- Optional `tracker.CommentWriter` support so `trackerwrite` can execute
+  `op=comment` when the configured writer implements comments, while
+  non-comment writers continue to receive `unsupported_op`.
 
 ### Changed
 
@@ -51,8 +54,9 @@ This project uses a hand-curated changelog.
 - Close-only `tracker.CloseWriter` interface.
 - `trackerwrite` tool. v0.1.0 executes `op=close`, optionally executes
   `op=transition` when the configured writer implements
-  `tracker.TransitionWriter`, and keeps `comment` and `link_pr` parsed for
-  schema compatibility while returning `unsupported_op`.
+  `tracker.TransitionWriter`, optionally executes `op=comment` when the
+  configured writer implements `tracker.CommentWriter`, and keeps `link_pr`
+  parsed for schema compatibility while returning `unsupported_op`.
 - `tracker/beads` adapter over `github.com/mattsp1290/beads-go/beads`.
 - CI checks for tests, lint, race tests, module tidiness, and dependency
   hygiene.
@@ -69,8 +73,10 @@ This project uses a hand-curated changelog.
   a thin type alias or conversion shim during adoption.
 - `trackerwrite` accepts `tracker.CloseWriter` in `New` and enables
   `op=transition` only when the configured writer also implements
-  `tracker.TransitionWriter`. Consumers needing comments or PR links must keep
-  those operations in their own tracker layer until a later API promotion.
+  `tracker.TransitionWriter`; it enables `op=comment` only when the configured
+  writer also implements `tracker.CommentWriter`. Consumers needing PR links
+  must keep those operations in their own tracker layer until a later API
+  promotion.
 - `search` requires `rg` on `PATH`.
 - `shell` executes model-provided commands by design. Workspace containment,
   network policy, secrets, and sandbox enforcement remain caller concerns.

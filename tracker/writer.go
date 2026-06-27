@@ -13,3 +13,10 @@ type TransitionWriter interface {
 	CloseWriter
 	Transition(ctx context.Context, id, toState string) error
 }
+
+// CommentWriter is an optional tracker mutation surface for writers that can
+// close issues and post comments.
+type CommentWriter interface {
+	CloseWriter
+	Comment(ctx context.Context, id, body string) error
+}

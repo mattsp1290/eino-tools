@@ -54,6 +54,75 @@ func (f *fakeTransitionWriter) Transition(_ context.Context, id, toState string)
 	return f.transitionErr
 }
 
+type fakeCommentWriter struct {
+	mu           sync.Mutex
+	closeID      string
+	closeReason  string
+	closeCalls   int
+	commentID    string
+	commentBody  string
+	commentErr   error
+	commentCalls int
+}
+
+func (f *fakeCommentWriter) Close(_ context.Context, id, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closeCalls++
+	f.closeID = id
+	f.closeReason = reason
+	return nil
+}
+
+func (f *fakeCommentWriter) Comment(_ context.Context, id, body string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commentCalls++
+	f.commentID = id
+	f.commentBody = body
+	return f.commentErr
+}
+
+type fakeFullWriter struct {
+	mu              sync.Mutex
+	closeCalls      int
+	transitionCalls int
+	commentCalls    int
+	closeID         string
+	closeReason     string
+	transitionID    string
+	transitionState string
+	commentID       string
+	commentBody     string
+}
+
+func (f *fakeFullWriter) Close(_ context.Context, id, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closeCalls++
+	f.closeID = id
+	f.closeReason = reason
+	return nil
+}
+
+func (f *fakeFullWriter) Transition(_ context.Context, id, toState string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.transitionCalls++
+	f.transitionID = id
+	f.transitionState = toState
+	return nil
+}
+
+func (f *fakeFullWriter) Comment(_ context.Context, id, body string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commentCalls++
+	f.commentID = id
+	f.commentBody = body
+	return nil
+}
+
 func TestRunCloseSucceeds(t *testing.T) {
 	t.Parallel()
 
@@ -94,6 +163,96 @@ func TestRunTransitionSucceedsWhenWriterSupportsIt(t *testing.T) {
 	}
 	if writer.closeCalls != 0 {
 		t.Fatalf("close called %d times", writer.closeCalls)
+	}
+}
+
+func TestRunCommentSucceedsWhenWriterSupportsIt(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeCommentWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := tool.Run(context.Background(), Args{Op: OpComment, ID: "T-1", Body: "verdict: pass"})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("outcome = %q, want succeeded; error=%+v", res.Outcome, res.Error)
+	}
+	if res.Op != OpComment || res.ID != "T-1" {
+		t.Fatalf("res = %+v", res)
+	}
+	if writer.commentCalls != 1 || writer.commentID != "T-1" || writer.commentBody != "verdict: pass" {
+		t.Fatalf("comment = calls:%d id:%q body:%q", writer.commentCalls, writer.commentID, writer.commentBody)
+	}
+	if writer.closeCalls != 0 {
+		t.Fatalf("close called %d times", writer.closeCalls)
+	}
+}
+
+func TestRunCommentPreservesRawBody(t *testing.T) {
+	t.Parallel()
+
+	const rawBody = "  verdict: pass\n"
+	writer := &fakeCommentWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := tool.Run(context.Background(), Args{Op: OpComment, ID: "T-1", Body: rawBody})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("outcome = %q, want succeeded; error=%+v", res.Outcome, res.Error)
+	}
+	if writer.commentBody != rawBody {
+		t.Fatalf("commentBody = %q, want raw %q", writer.commentBody, rawBody)
+	}
+}
+
+func TestCommentWriterStillRoutesClose(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeCommentWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := tool.Run(context.Background(), Args{Op: OpClose, ID: "T-1", Reason: "done"})
+	if res.Outcome != result.OutcomeSucceeded || res.Op != OpClose {
+		t.Fatalf("res = %+v", res)
+	}
+	if writer.closeCalls != 1 || writer.closeID != "T-1" || writer.closeReason != "done" || writer.commentCalls != 0 {
+		t.Fatalf("writer called close:%d id:%q reason:%q comment:%d",
+			writer.closeCalls, writer.closeID, writer.closeReason, writer.commentCalls)
+	}
+}
+
+func TestCommentAndTransitionWriterRoutesEachOp(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeFullWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	for _, args := range []Args{
+		{Op: OpClose, ID: "T-1", Reason: "done"},
+		{Op: OpTransition, ID: "T-2", ToState: "accepted"},
+		{Op: OpComment, ID: "T-3", Body: "verdict: pass"},
+	} {
+		res := tool.Run(context.Background(), args)
+		if res.Outcome != result.OutcomeSucceeded {
+			t.Fatalf("Run(%+v) = %+v", args, res)
+		}
+	}
+
+	if writer.closeCalls != 1 || writer.closeID != "T-1" || writer.closeReason != "done" {
+		t.Fatalf("close = calls:%d id:%q reason:%q", writer.closeCalls, writer.closeID, writer.closeReason)
+	}
+	if writer.transitionCalls != 1 || writer.transitionID != "T-2" || writer.transitionState != "accepted" {
+		t.Fatalf("transition = calls:%d id:%q state:%q", writer.transitionCalls, writer.transitionID, writer.transitionState)
+	}
+	if writer.commentCalls != 1 || writer.commentID != "T-3" || writer.commentBody != "verdict: pass" {
+		t.Fatalf("comment = calls:%d id:%q body:%q", writer.commentCalls, writer.commentID, writer.commentBody)
 	}
 }
 
@@ -138,6 +297,139 @@ func TestCommentAndLinkPRUnsupportedWithTransitionWriter(t *testing.T) {
 				t.Fatalf("writer called close:%d transition:%d times", writer.closeCalls, writer.transitionCalls)
 			}
 		})
+	}
+}
+
+func TestRunCommentRequiresBodyWhenWriterSupportsIt(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "empty", body: ""},
+		{name: "whitespace", body: " \n\t "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			writer := &fakeCommentWriter{}
+			tool, err := New(writer)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			res := tool.Run(context.Background(), Args{Op: OpComment, ID: "T-1", Body: tc.body})
+			assertFailureCategory(t, res, ErrCategoryValidation)
+			if res.Error.Message != "body is required and must be non-empty for op comment" {
+				t.Fatalf("message = %q", res.Error.Message)
+			}
+			if writer.commentCalls != 0 || writer.closeCalls != 0 {
+				t.Fatalf("writer called close:%d comment:%d times", writer.closeCalls, writer.commentCalls)
+			}
+		})
+	}
+}
+
+func TestCommentOnCloseOnlyWriterIsUnsupportedRegardlessOfBody(t *testing.T) {
+	t.Parallel()
+
+	const wantMsg = `op "comment" is not supported by the configured writer; supported ops: [close]`
+
+	for _, tc := range []struct {
+		name string
+		args Args
+	}{
+		{name: "empty body", args: Args{Op: OpComment, ID: "T-1"}},
+		{name: "with body", args: Args{Op: OpComment, ID: "T-1", Body: "verdict: pass"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			writer := &fakeCloseWriter{}
+			tool, err := New(writer)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			res := tool.Run(context.Background(), tc.args)
+			assertFailureCategory(t, res, ErrCategoryUnsupportedOp)
+			if res.Error.Message != wantMsg {
+				t.Fatalf("message = %q, want %q", res.Error.Message, wantMsg)
+			}
+			if writer.calls != 0 {
+				t.Fatalf("writer called %d times", writer.calls)
+			}
+		})
+	}
+}
+
+func TestCommentOnTransitionWriterIsUnsupportedRegardlessOfBody(t *testing.T) {
+	t.Parallel()
+
+	const wantMsg = `op "comment" is not supported by the configured writer; supported ops: [close, transition]`
+
+	for _, tc := range []struct {
+		name string
+		args Args
+	}{
+		{name: "empty body", args: Args{Op: OpComment, ID: "T-1"}},
+		{name: "with body", args: Args{Op: OpComment, ID: "T-1", Body: "verdict: pass"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			writer := &fakeTransitionWriter{}
+			tool, err := New(writer)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			res := tool.Run(context.Background(), tc.args)
+			assertFailureCategory(t, res, ErrCategoryUnsupportedOp)
+			if res.Error.Message != wantMsg {
+				t.Fatalf("message = %q, want %q", res.Error.Message, wantMsg)
+			}
+			if writer.closeCalls != 0 || writer.transitionCalls != 0 {
+				t.Fatalf("writer called close:%d transition:%d times", writer.closeCalls, writer.transitionCalls)
+			}
+		})
+	}
+}
+
+func TestCommentWriterWithoutTransitionAdvertisesCloseComment(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeCommentWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for _, op := range []Op{OpTransition, OpLinkPR} {
+		res := tool.Run(context.Background(), Args{Op: op, ID: "T-1"})
+		assertFailureCategory(t, res, ErrCategoryUnsupportedOp)
+		if !strings.Contains(res.Error.Message, "supported ops: [close, comment]") {
+			t.Fatalf("message = %q, want close/comment supported ops", res.Error.Message)
+		}
+	}
+	if writer.closeCalls != 0 || writer.commentCalls != 0 {
+		t.Fatalf("writer called close:%d comment:%d times", writer.closeCalls, writer.commentCalls)
+	}
+}
+
+func TestWriterWithCommentAndTransitionAdvertisesAllSupportedOps(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeFullWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := tool.Run(context.Background(), Args{Op: OpLinkPR, ID: "T-1"})
+	assertFailureCategory(t, res, ErrCategoryUnsupportedOp)
+	if !strings.Contains(res.Error.Message, "supported ops: [close, transition, comment]") {
+		t.Fatalf("message = %q, want all supported ops", res.Error.Message)
+	}
+	if writer.closeCalls != 0 || writer.transitionCalls != 0 || writer.commentCalls != 0 {
+		t.Fatalf("writer called close:%d transition:%d comment:%d times",
+			writer.closeCalls, writer.transitionCalls, writer.commentCalls)
 	}
 }
 
@@ -281,6 +573,32 @@ func TestRunTransitionWriterErrors(t *testing.T) {
 	}
 }
 
+func TestRunCommentWriterErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "deadline", err: context.DeadlineExceeded, want: ErrCategoryTimeout},
+		{name: "canceled", err: context.Canceled, want: ErrCategoryCanceled},
+		{name: "unknown", err: errors.New("boom"), want: ErrCategoryUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tool, err := New(&fakeCommentWriter{commentErr: tt.err})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			assertFailureCategory(t, tool.Run(context.Background(), Args{Op: OpComment, ID: "T-1", Body: "verdict: pass"}), tt.want)
+		})
+	}
+}
+
 func TestInvokableRun(t *testing.T) {
 	t.Parallel()
 
@@ -308,6 +626,30 @@ func TestInvokableRun(t *testing.T) {
 		t.Fatalf("unmarshal unsupported result: %v", unmarshalErr)
 	}
 	assertFailureCategory(t, got, ErrCategoryUnsupportedOp)
+}
+
+func TestInvokableRunComment(t *testing.T) {
+	t.Parallel()
+
+	writer := &fakeCommentWriter{}
+	tool, err := New(writer)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	raw, err := tool.InvokableRun(context.Background(), `{"op":"comment","id":"T-1","body":"verdict: pass"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var got Result
+	if unmarshalErr := json.Unmarshal([]byte(raw), &got); unmarshalErr != nil {
+		t.Fatalf("unmarshal result: %v", unmarshalErr)
+	}
+	if got.Outcome != result.OutcomeSucceeded || got.Op != OpComment || got.ID != "T-1" {
+		t.Fatalf("got = %+v", got)
+	}
+	if writer.commentCalls != 1 || writer.commentID != "T-1" || writer.commentBody != "verdict: pass" {
+		t.Fatalf("comment = calls:%d id:%q body:%q", writer.commentCalls, writer.commentID, writer.commentBody)
+	}
 }
 
 func TestInvokableRunTransition(t *testing.T) {
@@ -390,6 +732,35 @@ func TestSchemaAndNameABI(t *testing.T) {
 			t.Fatalf("property %q missing from schema", property)
 		}
 	}
+
+	opDesc := schemaPropertyDescription(t, schema.Properties["op"])
+	for _, want := range []string{"comment", "configured writer supports"} {
+		if !strings.Contains(opDesc, want) {
+			t.Fatalf("op description = %q, want %q", opDesc, want)
+		}
+	}
+	bodyDesc := schemaPropertyDescription(t, schema.Properties["body"])
+	if !strings.Contains(bodyDesc, "Required for op=comment") || strings.Contains(bodyDesc, "post-v1") {
+		t.Fatalf("body description = %q", bodyDesc)
+	}
+}
+
+func TestInfoDescriptionMentionsOptionalCommentSupport(t *testing.T) {
+	t.Parallel()
+
+	tool, err := New(&fakeCommentWriter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	for _, want := range []string{"op=comment", "configured writer supports", "op=link_pr", "unsupported_op"} {
+		if !strings.Contains(info.Desc, want) {
+			t.Fatalf("Info.Desc = %q, want %q", info.Desc, want)
+		}
+	}
 }
 
 func TestResultIsRetryable(t *testing.T) {
@@ -463,4 +834,16 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func schemaPropertyDescription(t *testing.T, raw json.RawMessage) string {
+	t.Helper()
+
+	var property struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &property); err != nil {
+		t.Fatalf("property schema parse: %v", err)
+	}
+	return property.Description
 }

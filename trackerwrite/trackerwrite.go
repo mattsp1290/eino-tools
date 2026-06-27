@@ -117,10 +117,10 @@ const (
 // Tool is the v0.1 tracker_write tool.
 type Tool struct {
 	writer tracker.CloseWriter
-	// transitionWriter is non-nil only when writer also implements
-	// tracker.TransitionWriter; when it is set it is the same value as writer.
-	// nil means op=transition returns unsupported_op.
+	// Optional mutation surfaces are non-nil only when writer also implements
+	// the matching tracker interface. nil means that op returns unsupported_op.
 	transitionWriter tracker.TransitionWriter
+	commentWriter    tracker.CommentWriter
 }
 
 // New constructs a Tool.
@@ -129,11 +129,10 @@ func New(w tracker.CloseWriter) (*Tool, error) {
 		return nil, errors.New("tracker_write: CloseWriter is required")
 	}
 	t := &Tool{writer: w}
-	// Implementing tracker.TransitionWriter is the opt-in mechanism for
-	// exposing op=transition to the model: a CloseWriter that grows a matching
-	// Transition method silently gains the transition surface, so don't add one
-	// casually. transitionWriter stays nil for close-only writers.
+	// Implementing optional tracker interfaces is the opt-in mechanism for
+	// exposing richer ops to the model. These capabilities are independent.
 	t.transitionWriter, _ = w.(tracker.TransitionWriter)
+	t.commentWriter, _ = w.(tracker.CommentWriter)
 	return t, nil
 }
 
@@ -141,10 +140,14 @@ func New(w tracker.CloseWriter) (*Tool, error) {
 // execute, so unsupported_op messages never claim a capability the configured
 // writer lacks (or omit one it has).
 func (t *Tool) supportedOps() string {
+	ops := []string{string(OpClose)}
 	if t.transitionWriter != nil {
-		return string(OpClose) + ", " + string(OpTransition)
+		ops = append(ops, string(OpTransition))
 	}
-	return string(OpClose)
+	if t.commentWriter != nil {
+		ops = append(ops, string(OpComment))
+	}
+	return strings.Join(ops, ", ")
 }
 
 const schemaJSON = `{
@@ -154,7 +157,7 @@ const schemaJSON = `{
     "op": {
       "type": "string",
       "enum": ["comment", "transition", "close", "link_pr"],
-      "description": "Discriminator. v1 implements 'close' and optionally 'transition' when the configured writer supports it; other ops return tool_failed{error.category=unsupported_op}."
+      "description": "Discriminator. v1 implements 'close' and optionally 'transition' or 'comment' when the configured writer supports those capabilities; unsupported ops return tool_failed{error.category=unsupported_op}."
     },
     "id": {
       "type": "string",
@@ -164,7 +167,7 @@ const schemaJSON = `{
     "body": {
       "type": "string",
       "minLength": 1,
-      "description": "Comment body. Required for op=comment (post-v1)."
+      "description": "Comment body. Required for op=comment."
     },
     "toState": {
       "type": "string",
@@ -232,7 +235,23 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 			return failedFromWriterErr(args, err)
 		}
 		return succeededResult(args)
-	case OpComment, OpLinkPR:
+	case OpComment:
+		// Capability is checked before shape: a close/transition-only writer can
+		// never post comments, so report unsupported_op (terminal) rather than
+		// asking the model to retry with body.
+		if t.commentWriter == nil {
+			return failedResult(args, ErrCategoryUnsupportedOp,
+				fmt.Sprintf("op %q is not supported by the configured writer; supported ops: [%s]",
+					args.Op, t.supportedOps()))
+		}
+		if strings.TrimSpace(args.Body) == "" {
+			return failedResult(args, ErrCategoryValidation, "body is required and must be non-empty for op comment")
+		}
+		if err := t.commentWriter.Comment(ctx, args.ID, args.Body); err != nil {
+			return failedFromWriterErr(args, err)
+		}
+		return succeededResult(args)
+	case OpLinkPR:
 		return failedResult(args, ErrCategoryUnsupportedOp,
 			fmt.Sprintf("op %q is defined but not implemented in v1; supported ops: [%s]",
 				args.Op, t.supportedOps()))
@@ -250,7 +269,7 @@ func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	}
 	return &schema.ToolInfo{
 		Name:        Name,
-		Desc:        "Mutate the issue tracker. v1 implements op=close and can implement op=transition when the configured writer supports transitions. Unsupported ops return tool_failed{error.category=unsupported_op}.",
+		Desc:        "Mutate the issue tracker. v1 implements op=close and can implement op=transition and op=comment when the configured writer supports those capabilities. Unsupported ops such as op=link_pr return tool_failed{error.category=unsupported_op}.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
 }

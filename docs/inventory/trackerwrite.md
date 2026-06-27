@@ -43,7 +43,7 @@ Local-symphony's `tracker.TrackerWriter` contains:
 - `LinkPR(ctx, id, prURL string) error`
 
 `eino-tools/tracker` must not lift that whole surface for v0.1. Per ADR 0003,
-lift only:
+the required surface stays close-only:
 
 ```go
 type CloseWriter interface {
@@ -51,10 +51,25 @@ type CloseWriter interface {
 }
 ```
 
+Optional capabilities are exposed as additive interfaces:
+
+```go
+type TransitionWriter interface {
+	CloseWriter
+	Transition(ctx context.Context, id, toState string) error
+}
+
+type CommentWriter interface {
+	CloseWriter
+	Comment(ctx context.Context, id, body string) error
+}
+```
+
 `trackerwrite.Args` can keep parsing compatibility fields for the schema, but
 the extracted package should avoid exporting or depending on
 local-symphony `core.IssueState`. Use a string field for `toState` until a
-future ADR promotes issue states.
+future ADR promotes issue states. Comment bodies also stay plain strings at the
+`eino-tools` boundary.
 
 ## Schema Contract
 
@@ -74,11 +89,10 @@ Properties:
 - `reason`: optional string.
 - `prURL`: optional string, `minLength: 1`.
 
-The schema intentionally accepts all four ops. In v0.1, per-op required fields
-for unsupported ops are not enforced by schema, because execution should return
-the more actionable `unsupported_op` envelope. If comment, transition, or
-link_pr start executing, the schema must gain discriminator-aware per-op
-validation.
+The schema intentionally accepts all four ops. Per-op required fields for
+capability-gated or unsupported ops are enforced by execution rather than schema,
+because execution can return the more actionable `unsupported_op` envelope when
+the configured writer lacks a capability.
 
 ## Close Execution Path
 
@@ -95,10 +109,26 @@ Execution validation order:
 `reason` is optional and forwarded as provided by the tool; the beads adapter is
 responsible for any whitespace trimming noted by local-symphony comments.
 
+## Comment Execution Path
+
+`op=comment` is capability-gated by `tracker.CommentWriter`.
+
+Execution behavior:
+
+1. If the configured writer does not implement `CommentWriter`, return
+   `unsupported_op` before validating `body`.
+2. Empty or whitespace-only `body` returns `validation`.
+3. Non-empty bodies are forwarded to `Comment(ctx, args.ID, args.Body)` exactly
+   as provided; only the emptiness check trims whitespace.
+4. Comment writer errors map through the same result-category path as close and
+   transition writer errors.
+
 ## Unsupported-Op Behavior
 
-For `comment`, `transition`, and `link_pr`, v0.1 must not call writer methods.
-It returns:
+For operations not supported by the configured writer, `trackerwrite` must not
+call writer methods. This includes `transition` without `TransitionWriter`,
+`comment` without `CommentWriter`, and `link_pr` for all current writers. It
+returns:
 
 - `outcome=failed`
 - `error.category=unsupported_op`

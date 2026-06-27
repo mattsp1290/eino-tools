@@ -18,7 +18,9 @@ agent workers.
 - `tracker/beads`: adapter from `github.com/mattsp1290/beads-go/beads` to
   `tracker.CloseWriter`.
 - `trackerwrite`: `tracker_write` tool; v0.1 executes `op=close` through
-  `tracker.CloseWriter`.
+  `tracker.CloseWriter`, optionally executes `op=transition` through
+  `tracker.TransitionWriter`, and optionally executes `op=comment` through
+  `tracker.CommentWriter`.
 - `urlfetch`: `url_fetch` tool; fetches raw text from `file://` or `https://` URLs.
 - `userinteract`: `user_interact` tool; asks the user a question and returns their
   answer; works in CLI (blocking stdin) and MCP (non-blocking pending/answer) modes.
