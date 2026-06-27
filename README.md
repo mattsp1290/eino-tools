@@ -32,6 +32,21 @@ agent workers.
 - `bd` on `PATH` only for consumers that use `tracker/beads` with the default
   beads-go exec-backed client, or for the tagged integration test.
 
+## Development
+
+Run the standard local gates from the repository root:
+
+```sh
+make test
+make vet
+make lint
+```
+
+`make lint` is the supported lint entry point. It pins `golangci-lint` and runs
+it with a Go toolchain compatible with the repo's Go 1.26 lint target. A
+`golangci-lint run` binary from `PATH` may fail before linting if that binary was
+built with an older Go version.
+
 ## Examples
 
 ```go

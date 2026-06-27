@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -308,7 +309,9 @@ func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved st
 						}
 					}
 					content.WriteString(line)
-					fmt.Fprintf(&numbered, "%d: %s", totalLines, line)
+					numbered.WriteString(strconv.Itoa(totalLines))
+					numbered.WriteString(": ")
+					numbered.WriteString(line)
 					contentBytes += len(line)
 					lineEnd = totalLines
 				}
