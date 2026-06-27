@@ -77,7 +77,7 @@ Target behavior:
 Implementation guidance:
 
 - Add an unexported helper near `rgErrorMessage` or near the exit switch, for example `rgExit2ErrorCategory(stderr string) string`.
-- Classify common ripgrep regex diagnostics as invalid pattern. Test against the exact stderr emitted by installed `rg` rather than depending on one phrase only. Useful indicators may include phrases such as `regex parse error`, `unclosed`, `look-around`, or ripgrep's pattern diagnostic format.
+- Classify only ripgrep diagnostics that are anchored to regex/pattern parse output as invalid pattern. Prefer exact structures observed from `rg`, such as a line containing `regex parse error:`, rather than broad substrings like `unclosed` or `look-around` that could appear in filenames or runtime diagnostics.
 - Default unknown exit-code-2 diagnostics to `ErrCategoryExecFailed`, not `ErrCategoryInvalidPattern`. This is safer for the request because only known regex parse failures should be pattern errors.
 - Keep the error message from `rgErrorMessage(stderrBuf, waitErr)` so callers still get the raw ripgrep context.
 
@@ -117,14 +117,13 @@ If ripgrep returns exit 1 rather than 2 in the local environment, adjust setup s
 
 ### Partial With Matches Plus Inaccessible Path
 
-Add this if the platform setup is reliable:
+Add deterministic coverage for this required behavior:
 
-- Create a readable file containing `needle`.
-- Create a denied directory in the same searched root.
-- Search from workspace root.
+- Prefer a fake `rg` test binary/script injected into `Tool.rgBinary` from inside the `search` package tests.
+- Have the fake emit one valid JSON match to stdout, write a permission-style diagnostic to stderr, and exit with status `2`.
 - Assert `OutcomeSucceeded`, `Partial == true`, `Error.Category == ErrCategoryExecFailed`, and at least one returned match.
 
-If this is too environment-sensitive, keep the helper unit-testable by adding a table test for the stderr classifier and rely on the zero-match integration test for end-to-end coverage.
+Keep chmod-based permission tests as optional integration coverage only. The partial-with-matches path must not depend on filesystem permission behavior that varies by OS, container user, or root-like execution.
 
 ## 5. Update Documentation
 
@@ -140,27 +139,31 @@ Do not alter unrelated ownership boundaries in ADR 0008 unless the implementatio
 
 ## 6. Create the Response Artifact
 
-After implementation, tests, and commit are complete, create:
+After implementation, tests, the final repo commit, and any required `git pull --rebase` are complete, create:
 
 ```text
 /Users/punk1290/.agents/projects/eino-tools/responses/2026-06-26-coding-agent-tool-parity-for-eino-agent.md
 ```
 
-Create the `responses/` directory if needed.
+Create the `responses/` directory if needed. This artifact is outside the `eino-tools` git repo; the pin it records should be the actual commit that will be pushed to `github.com/mattsp1290/eino-tools`, not a speculative pre-rebase SHA.
 
 The artifact must include:
 
 - Original request: `/Users/punk1290/.agents/projects/eino-tools/requests/2026-06-26-coding-agent-tool-parity-for-eino-agent.md`
 - Verification-gap request: `/Users/punk1290/.agents/projects/eino-tools/requests/2026-06-27-coding-agent-tool-parity-verification-gaps.md`
 - Completion status for the original parity request.
-- Exact commit or tag for `eino-agent` to pin, from `git rev-parse HEAD` after the final commit.
+- Exact commit or tag for `eino-agent` to pin, from `git rev-parse HEAD` after the final commit and after any rebase.
 - Verification commands and results:
   - `go test ./...`
   - `go vet ./...`
   - `golangci-lint run`
+- Search implementation choice and the exit-code-2 classification fix.
+- Workspace filesystem serialization contract and granularity required by `eino-agent`.
+- `web_search` ownership decision.
+- LSP/diagnostics ownership decision.
 - Remaining intentional deferrals, if any. If none, state `None`.
 
-Do not fill in a speculative commit hash before the final implementation commit exists.
+Do not fill in a speculative commit hash before the final implementation commit exists and the branch has been rebased onto the push target.
 
 ## 7. Final Verification and Closeout
 
@@ -173,17 +176,19 @@ golangci-lint run
 git status --short
 ```
 
-Then follow the repo close protocol:
+Then follow the repo close protocol. Because the response artifact is outside this repo and must record the pushed commit, commit and rebase before writing the response artifact:
 
 ```bash
-bd close <implementation-bead-id> --reason="Verification gaps closed"
 git add <changed-files>
 git commit -m "Close coding-agent parity verification gaps"
 git pull --rebase
+PIN=$(git rev-parse HEAD)
+mkdir -p /Users/punk1290/.agents/projects/eino-tools/responses
+# Write /Users/punk1290/.agents/projects/eino-tools/responses/2026-06-26-coding-agent-tool-parity-for-eino-agent.md with PIN.
+bd close <implementation-bead-id> --reason="Verification gaps closed"
 bd dolt push
 git push
 git status
 ```
 
 `git status` must show the branch up to date with origin before the work is considered complete.
-

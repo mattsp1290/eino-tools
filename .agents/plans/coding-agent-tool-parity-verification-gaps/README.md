@@ -60,7 +60,7 @@ The behavioral gap is that `search/search.go` maps all ripgrep exit code `2` wit
 - Keep invalid regex classification stable for callers: invalid regex remains `outcome=failed`, `error.category="invalid_pattern"`.
 - Treat ripgrep access/execution diagnostics as `exec_failed`: permission denied, operation not permitted, I/O errors, failed directory access, and similar `rg:` runtime diagnostics.
 - Use narrow `//nolint:gosec` comments only where the path has already passed existing workspace containment and target preflight. Do not blanket-disable gosec for the file or package.
-- Create the response artifact after verification, because it must include the final commit or tag. The implementing agent should use `git rev-parse HEAD` after committing fixes and record that value.
+- Create the response artifact after the final repo commit is made and after any `git pull --rebase`, because it must record the actual commit that will be pushed for `eino-agent` to pin. The response artifact lives outside this repo under `/Users/punk1290/.agents/projects/eino-tools/responses/`; do not include it in the repo commit unless the project-standard location changes.
 
 ## Constraints
 
@@ -68,4 +68,3 @@ The behavioral gap is that `search/search.go` maps all ripgrep exit code `2` wit
 - Keep path containment and symlink-escape protections unchanged.
 - Do not invent LSP, web-search, concurrency, telemetry, or permission-prompting behavior; ADR 0008 already documents ownership boundaries.
 - Tests that rely on permissions should skip on platforms where the setup is not meaningful, especially Windows or root-like environments where chmod denial does not behave normally.
-

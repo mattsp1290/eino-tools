@@ -37,6 +37,10 @@ It should include:
 - Status of the original parity request.
 - Final commit or tag for `eino-agent` to pin.
 - Verification command results with dates.
+- Search implementation choice and the exit-code-2 classifier correction.
+- Workspace filesystem serialization contract and required granularity for `eino-agent`.
+- `web_search` ownership decision.
+- LSP/diagnostics ownership decision.
 - Intentional deferrals, or `None`.
 
 Suggested shape:
@@ -48,6 +52,13 @@ Original request: ...
 Verification-gap request: ...
 Status: Complete
 Pin: <commit-or-tag>
+
+## Scope Decisions
+
+- Search implementation: <ripgrep-backed search choice and exit-code-2 classification note>
+- Workspace filesystem serialization: <whether eino-agent must serialize fileops/glob/search/apply_patch calls and at what granularity>
+- Web search ownership: <eino-agent/eino-tools decision>
+- LSP/diagnostics ownership: <eino-agent/eino-tools/later-package decision>
 
 ## Verification
 
@@ -76,4 +87,3 @@ git status
 ```
 
 The final `git status` must show the branch is up to date with origin.
-
