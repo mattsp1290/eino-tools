@@ -29,19 +29,19 @@ READ_FIX=$(bd create --title="Replace formatted numbered read output with direct
 bd dep add "$READ_FIX" "$BASELINE"
 
 CI_LINT=$(bd create --title="Replace stale CI golangci-lint invocation with pinned compatible v2.x lint path" \
-  --description="Update .github/workflows/ci.yml so lint no longer uses golangci-lint v2.4.0 built with Go 1.24 against this repo's Go 1.26 config. Prefer golangci/golangci-lint-action@v9 pinned to golangci-lint v2.12.2, or another verified compatible v2.x path." \
+  --description="Add a durable repo lint entry point, preferably scripts/lint.sh, that builds pinned golangci-lint v2.12.2 with the active Go 1.26 toolchain and runs ./...; update .github/workflows/ci.yml so lint calls that script instead of the stale v2.4.0 go-run command." \
   --type=bug \
   --priority=0)
 bd dep add "$CI_LINT" "$BASELINE"
 
 DOCS=$(bd create --title="Document durable local lint expectations" \
-  --description="If needed, update README.md or equivalent repo docs so future agents know the standard local lint command and required golangci-lint compatibility with Go 1.26." \
+  --description="Update README.md or equivalent repo docs so future agents know ./scripts/lint.sh is the durable local lint command, with plain golangci-lint run acceptable only when the PATH binary is a compatible v2.x build." \
   --type=task \
   --priority=1)
 bd dep add "$DOCS" "$CI_LINT"
 
 VERIFY=$(bd create --title="Verify tests, vet, and durable lint pass" \
-  --description="Run go test ./..., go vet ./..., and golangci-lint run from the repo root after code and CI changes. Confirm CI lint is pinned to a compatible v2.x path." \
+  --description="Run go test ./..., go vet ./..., ./scripts/lint.sh, and plain golangci-lint run if a compatible PATH binary is available. Confirm CI lint calls the durable repo script." \
   --type=task \
   --priority=0)
 bd dep add "$VERIFY" "$READ_FIX"

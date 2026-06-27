@@ -9,10 +9,19 @@ Run from `/Users/punk1290/git/eino-tools`:
 ```bash
 go test ./...
 go vet ./...
+./scripts/lint.sh
+```
+
+All three must pass using normal repo-root execution. `./scripts/lint.sh` must not depend on `/tmp/eino-tools-bin` or any other temporary binary path.
+
+Also run this when a normal PATH binary is available:
+
+```bash
+golangci-lint --version
 golangci-lint run
 ```
 
-All three must pass using normal repo-root execution. `golangci-lint run` must not depend on `/tmp/eino-tools-bin` or any other temporary binary path.
+Plain `golangci-lint run` may fail only if the installed binary is stale or built with a Go version lower than the configured Go target. If it reports real lint findings, those findings must be fixed.
 
 ## Required Code Assertions
 
@@ -28,12 +37,14 @@ All three must pass using normal repo-root execution. `golangci-lint run` must n
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0 run ./...
 ```
 
-- CI lint uses a pinned v2.x `golangci-lint` path compatible with `.golangci.yml` `run.go: "1.26"`.
-- The CI lint target remains equivalent to `run ./...`.
+- CI lint calls the durable repo lint entry point, preferably `./scripts/lint.sh`, or otherwise uses a pinned v2.x `golangci-lint` path proven compatible with `.golangci.yml` `run.go: "1.26"`.
+- The resolved CI lint command shape remains equivalent to `golangci-lint run ./...`; it must not become `golangci-lint run run ./...`.
+- If `golangci/golangci-lint-action` is used instead of the script, use an exact action tag and prove the action-installed binary's `--version` reports a build Go version compatible with Go 1.26.
 
 ## Documentation Assertions
 
-- If local lint requires a minimum compatible `golangci-lint` build, the repo docs say so.
+- The repo docs identify `./scripts/lint.sh` as the durable local lint command.
+- If plain local lint requires a minimum compatible `golangci-lint` build, the repo docs say so.
 - Any documented local lint command is durable and reproducible by future agents.
 - No documentation tells agents to prepend `/tmp/eino-tools-bin` to `PATH`.
 
@@ -62,4 +73,3 @@ git status
 ```
 
 The final `git status` must show the branch up to date with origin.
-

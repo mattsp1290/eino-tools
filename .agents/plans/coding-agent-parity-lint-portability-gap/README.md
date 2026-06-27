@@ -20,7 +20,7 @@ The implementing agent should close two gaps:
 - `fileops/read.go`: numbered read output construction in the line-windowed read loop.
 - `.github/workflows/ci.yml`: the `Lint` step in the `unit` job.
 - `.golangci.yml`: only if the CI/local tool update reveals a repo-owned config issue; do not lower the configured Go target just to fit an old linter binary.
-- `README.md` or a short docs file: only if the project-standard lint command changes from plain `golangci-lint run`.
+- `README.md` or a short docs file: document the durable repo-standard lint command once it is added.
 - `/Users/punk1290/.agents/projects/eino-tools/responses/2026-06-26-coding-agent-tool-parity-for-eino-agent.md`: update if the final pushed commit changes the pin that `eino-agent` should consume.
 
 ## Current Signals
@@ -48,9 +48,10 @@ The request reports another normal PATH binary as `/opt/homebrew/bin/golangci-li
   - `numbered.WriteString(": ")`
   - `numbered.WriteString(line)`
 - Do not suppress `G705` for `fmt.Fprintf` unless direct builder writes fail for a concrete reason. The request explicitly identifies direct builder writes as the likely cleaner fix.
-- Align local and CI lint around one durable invocation. Preferred outcome: CI installs or runs a pinned `golangci-lint` version new enough to support `.golangci.yml` `run.go: "1.26"`, and the repo documents that same pin.
+- Align local and CI lint around one durable invocation. Preferred outcome: add a repo-provided lint entry point that builds/runs a pinned `golangci-lint` version with the repo's configured Go 1.26 toolchain, and have CI call that same entry point.
 - Do not reduce `go.mod` or `.golangci.yml` from Go 1.26 to work around a stale lint binary. That would weaken the repo baseline and conflict with the current CI matrix.
 - Keep this change focused on verification portability. Do not reopen completed parity behavior, search classification, ADR 0008, or tool schema decisions unless a verification command proves they are still broken.
+- A downloaded `golangci-lint` release binary is acceptable only if the implementing agent proves `golangci-lint --version` reports a build Go version compatible with `.golangci.yml` `run.go: "1.26"`. If that proof is not available, build the pinned linter from source with the repo's Go toolchain.
 
 ## Constraints
 
@@ -59,4 +60,3 @@ The request reports another normal PATH binary as `/opt/homebrew/bin/golangci-li
 - Avoid `/tmp`-dependent tooling in verification docs or response artifacts.
 - Use Beads for live task state during implementation.
 - End state must be committed and pushed per repo session protocol.
-
