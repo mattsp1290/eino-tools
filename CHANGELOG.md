@@ -14,6 +14,9 @@ This project uses a hand-curated changelog.
 - Line-windowed `file_read` via optional `offset` and `limit`, including raw and
   numbered content, total line metadata, byte/line/long-line truncation signals,
   and binary-file rejection.
+- Optional `tracker.TransitionWriter` support so `trackerwrite` can execute
+  `op=transition` when the configured writer implements transitions, while
+  close-only writers continue to receive `unsupported_op`.
 
 ### Changed
 
@@ -46,9 +49,10 @@ This project uses a hand-curated changelog.
   process-group cancellation, output caps, configurable env/shell binary/output
   cap, and RawJSON result compatibility.
 - Close-only `tracker.CloseWriter` interface.
-- `trackerwrite` tool. v0.1.0 executes only `op=close`; `comment`,
-  `transition`, and `link_pr` remain parsed for schema compatibility but return
-  `unsupported_op`.
+- `trackerwrite` tool. v0.1.0 executes `op=close`, optionally executes
+  `op=transition` when the configured writer implements
+  `tracker.TransitionWriter`, and keeps `comment` and `link_pr` parsed for
+  schema compatibility while returning `unsupported_op`.
 - `tracker/beads` adapter over `github.com/mattsp1290/beads-go/beads`.
 - CI checks for tests, lint, race tests, module tidiness, and dependency
   hygiene.
@@ -63,9 +67,10 @@ This project uses a hand-curated changelog.
 - `dispatcher.ToolOutcome` from `local-symphony` is replaced by
   `result.Outcome`. Consumers that still expose a dispatcher outcome should use
   a thin type alias or conversion shim during adoption.
-- `trackerwrite` intentionally exposes only `tracker.CloseWriter` in v0.1.0.
-  Consumers needing comments, transitions, or PR links must keep those
-  operations in their own tracker layer until a later API promotion.
+- `trackerwrite` accepts `tracker.CloseWriter` in `New` and enables
+  `op=transition` only when the configured writer also implements
+  `tracker.TransitionWriter`. Consumers needing comments or PR links must keep
+  those operations in their own tracker layer until a later API promotion.
 - `search` requires `rg` on `PATH`.
 - `shell` executes model-provided commands by design. Workspace containment,
   network policy, secrets, and sandbox enforcement remain caller concerns.
