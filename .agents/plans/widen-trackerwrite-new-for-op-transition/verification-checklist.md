@@ -69,13 +69,21 @@ func New(w tracker.CloseWriter) (*Tool, error)
 ## Release Assertions
 
 - The final implementation is pushed to the remote.
-- Either a tag is pushed or the final commit SHA is recorded for the consumer.
+- A tag is pushed only if the user explicitly approved tagging and provided the exact version string.
+- If no approved tag exists, the final commit SHA is recorded for the consumer.
+- The exact tag or commit handed to the consumer is proven fetchable with `git ls-remote`: for tags, verify `refs/tags/<version>`; for commits, verify the pushed branch ref resolves to the handed-off SHA.
 - The consumer update command is known:
 
 ```bash
 go get github.com/mattsp1290/eino-tools@<tag-or-commit>
 go mod tidy
 ```
+
+## Consumer Follow-up Assertions
+
+- The `local-symphony` adapter follow-up uses a transition-capable adapter that converts `toState` from string to the configured issue-state type.
+- The prompt/runtime instruction follow-up tells the agent to call `tracker_write` with `op=transition` and `toState=<configured_success_state>`.
+- The success state is configuration-driven, not hardcoded.
 
 ## Closeout Assertions
 

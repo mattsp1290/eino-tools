@@ -33,7 +33,8 @@ After `eino-tools` is pinned to a commit or tag with `tracker.TransitionWriter`,
 - wraps the existing `tracker.TrackerWriter`;
 - exposes both `Close(ctx, id, reason string) error` and `Transition(ctx, id, toState string) error`;
 - converts the string `toState` into the consumer's `core.IssueState`;
-- rejects unknown target states using the consumer's existing validation/error mapping.
+- rejects unknown target states using the consumer's existing validation/error mapping;
+- updates the agent-facing prompt or runtime instructions to call `tracker_write` with `op=transition` and `toState=<configured_success_state>` after successful completion. Do not hardcode a single success state; use the configured success state for the issue type/status policy.
 
 Then the runtime can pass that adapter to the unchanged constructor:
 

@@ -129,7 +129,7 @@ If either command fails, determine whether the failure is caused by this change.
 
 ## 7. Release or Pin
 
-The consumer can use either a real tag or a pin-able commit. Prefer a tag if the repo owner wants public release semantics.
+The consumer can use either a real tag or a pin-able commit. Because this repo may not have established tag history, do not invent a version number during implementation.
 
 First ensure the implementation commit is pushed:
 
@@ -144,23 +144,28 @@ git push
 
 If no source edits were needed because the feature already exists, use the existing pushed commit after verification. Do not create an empty commit unless the user explicitly wants one.
 
-For a tag:
+Create a tag only when the user explicitly approves tagging and provides the exact version string. In that case:
 
 ```bash
 git tag -a <version> -m "Release <version>"
 git push origin <version>
+git ls-remote --tags origin refs/tags/<version>
 ```
 
-Choose `<version>` according to this repo's existing tag history:
+If tag approval or an exact version is not available, hand off the pushed commit SHA instead:
 
 ```bash
-git tag --sort=-creatordate | head -20
+commit=$(git rev-parse HEAD)
+branch=$(git branch --show-current)
+git ls-remote origin "refs/heads/${branch}" | grep -F "$commit"
 ```
 
-If there are no established tags or no version decision is available, record the verified commit SHA instead:
+Before giving the consumer command, prove the exact handoff ref is fetchable from the remote. For a tag, verify the tag ref. For a commit, verify the pushed branch ref resolves to the commit being handed off:
 
 ```bash
-git rev-parse HEAD
+git ls-remote --tags origin refs/tags/<version>
+# or
+git ls-remote origin "refs/heads/${branch}" | grep -F "$commit"
 ```
 
 The final handoff to `local-symphony` should say either:
