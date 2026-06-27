@@ -310,6 +310,88 @@ func TestRunLimitTruncates(t *testing.T) {
 	}
 }
 
+func TestRunInvalidRegexIsInvalidPattern(t *testing.T) {
+	t.Parallel()
+
+	tool, root := newTestTool(t)
+	writeFile(t, root, "file.txt", "needle\n")
+
+	res := tool.Run(context.Background(), Args{Pattern: "["})
+	if res.Outcome != result.OutcomeFailed {
+		t.Fatalf("Outcome = %q, want failed", res.Outcome)
+	}
+	if res.Error == nil || res.Error.Category != ErrCategoryInvalidPattern {
+		t.Fatalf("Error = %+v, want invalid_pattern", res.Error)
+	}
+	if res.MatchCount != 0 || len(res.Matches) != 0 {
+		t.Fatalf("matches = %+v count=%d, want empty", res.Matches, res.MatchCount)
+	}
+}
+
+func TestRunRgExit2PermissionWithoutMatchesIsExecFailed(t *testing.T) {
+	t.Parallel()
+
+	tool, root := newTestTool(t)
+	writeFile(t, root, "file.txt", "haystack\n")
+	tool.rgBinary = writeFakeRG(t, root, `#!/bin/sh
+printf '%s\n' 'rg: ./blocked: Permission denied (os error 13)' >&2
+exit 2
+`)
+
+	res := tool.Run(context.Background(), Args{Pattern: "needle"})
+	if res.Outcome != result.OutcomeFailed {
+		t.Fatalf("Outcome = %q, want failed", res.Outcome)
+	}
+	if res.Error == nil || res.Error.Category != ErrCategoryExecFailed {
+		t.Fatalf("Error = %+v, want exec_failed", res.Error)
+	}
+	if res.MatchCount != 0 || len(res.Matches) != 0 {
+		t.Fatalf("matches = %+v count=%d, want empty", res.Matches, res.MatchCount)
+	}
+}
+
+func TestRunRgExit2PermissionWithMatchesIsPartial(t *testing.T) {
+	t.Parallel()
+
+	tool, root := newTestTool(t)
+	writeFile(t, root, "hit.txt", "needle\n")
+	tool.rgBinary = writeFakeRG(t, root, `#!/bin/sh
+printf '%s\n' '{"type":"match","data":{"path":{"text":"hit.txt"},"lines":{"text":"needle\n"},"line_number":1,"submatches":[{"match":{"text":"needle"},"start":0,"end":6}]}}'
+printf '%s\n' 'rg: ./blocked: Permission denied (os error 13)' >&2
+exit 2
+`)
+
+	res := tool.Run(context.Background(), Args{Pattern: "needle"})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, want succeeded (err=%+v)", res.Outcome, res.Error)
+	}
+	if !res.Partial {
+		t.Fatal("Partial = false, want true")
+	}
+	if res.Error == nil || res.Error.Category != ErrCategoryExecFailed {
+		t.Fatalf("Error = %+v, want exec_failed", res.Error)
+	}
+	if res.MatchCount != 1 || len(res.Matches) != 1 {
+		t.Fatalf("matches = %+v count=%d, want one match", res.Matches, res.MatchCount)
+	}
+	if res.Matches[0].Path != "hit.txt" || res.Matches[0].LineNumber != 1 || res.Matches[0].Line != "needle" {
+		t.Fatalf("match = %+v, want hit.txt line 1 needle", res.Matches[0])
+	}
+}
+
+func writeFakeRG(t *testing.T, root, script string) string {
+	t.Helper()
+
+	path := filepath.Join(root, "fake-rg")
+	if runtime.GOOS == "windows" {
+		path += ".sh"
+	}
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("WriteFile fake rg: %v", err)
+	}
+	return path
+}
+
 func TestGlobArgumentAcceptsStringOrArray(t *testing.T) {
 	t.Parallel()
 

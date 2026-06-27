@@ -308,7 +308,7 @@ func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved st
 						}
 					}
 					content.WriteString(line)
-					numbered.WriteString(fmt.Sprintf("%d: %s", totalLines, line))
+					fmt.Fprintf(&numbered, "%d: %s", totalLines, line)
 					contentBytes += len(line)
 					lineEnd = totalLines
 				}

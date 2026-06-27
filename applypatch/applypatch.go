@@ -737,7 +737,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	tmpPath := tmp.Name()
 	cleanup := func() {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) //nolint:gosec // tmpPath is created by os.CreateTemp in the preflight-resolved target directory
 	}
 	if _, err := tmp.Write(data); err != nil {
 		cleanup()
@@ -748,11 +748,11 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 		return fmt.Errorf("chmod temp: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) //nolint:gosec // tmpPath is created by os.CreateTemp in the preflight-resolved target directory
 		return fmt.Errorf("close temp: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := os.Rename(tmpPath, path); err != nil { //nolint:gosec // path is workspace-contained by apply_patch preflight; tmpPath is created next to it
+		_ = os.Remove(tmpPath) //nolint:gosec // tmpPath is created by os.CreateTemp in the preflight-resolved target directory
 		return fmt.Errorf("rename temp to target: %w", err)
 	}
 	return nil

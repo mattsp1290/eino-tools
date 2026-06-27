@@ -160,8 +160,12 @@ Retryable result categories:
 - Ripgrep exit 0 -> `outcome=succeeded`.
 - Ripgrep exit 1 -> `outcome=succeeded` with an empty `matches` slice and
   `match_count=0`.
-- Ripgrep exit 2 -> `outcome=failed`, `error.category=invalid_pattern` when no
-  useful matches were parsed.
+- Ripgrep exit 2 with no parsed matches -> `outcome=failed`,
+  `error.category=invalid_pattern` only when stderr is classified as a
+  regex/pattern parse failure.
+- Ripgrep exit 2 with no parsed matches from inaccessible paths, permission
+  failures, or other runtime errors -> `outcome=failed`,
+  `error.category=exec_failed`.
 - Ripgrep exit 2 or unexpected non-zero with parsed matches ->
   `outcome=succeeded`, `partial=true`, and `error.category=exec_failed`.
 - Unexpected non-zero with no parsed matches -> `outcome=failed`,

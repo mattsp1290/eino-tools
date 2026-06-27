@@ -406,7 +406,7 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 			return res
 		}
 		res.Outcome = result.OutcomeFailed
-		res.Error = &ResultError{Category: ErrCategoryInvalidPattern, Message: rgErrorMessage(stderrBuf, waitErr)}
+		res.Error = &ResultError{Category: rgExit2ErrorCategory(stderrBuf), Message: rgErrorMessage(stderrBuf, waitErr)}
 		return res
 	default:
 		if len(matches) > 0 {
@@ -749,6 +749,16 @@ func exitCodeOf(err error) int {
 
 func isExecNotFound(err error) bool {
 	return errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist)
+}
+
+func rgExit2ErrorCategory(stderr *cappedBuffer) string {
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "regex parse error:" || strings.HasPrefix(line, "rg: regex parse error:") {
+			return ErrCategoryInvalidPattern
+		}
+	}
+	return ErrCategoryExecFailed
 }
 
 func rgErrorMessage(stderr *cappedBuffer, waitErr error) string {
