@@ -54,6 +54,7 @@ func New(w tracker.CloseWriter) (*Tool, error)
 - `op=close` still succeeds with a close-only writer.
 - `op=close` still succeeds with transition-capable and comment-capable writers.
 - `op=transition` behavior is unchanged.
+- A writer implementing both `TransitionWriter` and `CommentWriter` routes close, transition, and comment to the intended method with no cross-calls.
 - `op=comment` succeeds with a comment-capable writer and returns `OutcomeSucceeded`.
 - `op=comment` calls `Comment(ctx, id, body)`, not `Close`.
 - `op=comment` forwards the raw body, including intentional leading/trailing whitespace.
@@ -91,13 +92,14 @@ func New(w tracker.CloseWriter) (*Tool, error)
 
 - `CHANGELOG.md` documents the new optional `tracker.CommentWriter` support.
 - Any existing changelog text saying comments are unsupported is updated or scoped to older versions.
+- If a release tag is cut, `CHANGELOG.md` has a dated `v0.1.0 - YYYY-MM-DD` section rather than `v0.1.0 - Pending`, and `Unreleased` does not contain entries that are actually included in the tag.
 - `docs/inventory/trackerwrite.md` no longer states that all comment calls are unsupported in current behavior.
 - Documentation still states that `eino-tools` does not depend on consumer tracker types.
 
 ## Release Assertions
 
 - The final implementation commit is pushed to the remote.
-- If `v0.1.0` or another release tag is cut, the tag is pushed and verified with:
+- If `v0.1.0` or another release tag is cut, explicit release-owner approval was obtained in the implementation session, the tag is pushed, and the tag is verified with:
 
 ```bash
 git ls-remote --tags origin refs/tags/<version>
@@ -112,6 +114,7 @@ git ls-remote origin "refs/heads/${branch}" | grep -F "$commit"
 ```
 
 - The handoff ref for `local-symphony` is explicit: either a tag or a commit SHA.
+- If no tag is cut, the bead or handoff records `tag not approved in this session` so downstream agents know to use the commit SHA.
 
 ## Closeout Assertions
 
@@ -127,4 +130,3 @@ git status
 ```
 
 The final `git status` must show the branch up to date with origin.
-

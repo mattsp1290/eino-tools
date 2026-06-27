@@ -155,6 +155,8 @@ Required behavior coverage in `trackerwrite/trackerwrite_test.go`:
 
 - `TestRunCommentSucceedsWhenWriterSupportsIt`: success result, one `Comment` call, correct id, raw body forwarded.
 - `TestRunCommentPreservesRawBody`: body such as `"  verdict: pass\n"` passes raw, not trimmed.
+- `TestCommentWriterStillRoutesClose`: a comment-capable writer still routes `op=close` to `Close`, not `Comment`.
+- `TestCommentAndTransitionWriterRoutesEachOp`: a writer implementing both optional interfaces routes close, transition, and comment to the intended methods without cross-calls.
 - `TestRunCommentRequiresBodyWhenWriterSupportsIt`: empty and whitespace-only body return `ErrCategoryValidation`.
 - `TestCommentOnCloseOnlyWriterIsUnsupportedRegardlessOfBody`: close-only writer gets `ErrCategoryUnsupportedOp` whether body is absent or present, and writer is not called.
 - `TestCommentOnTransitionWriterIsUnsupportedRegardlessOfBody`: transition-capable but non-comment writer gets unsupported and no transition/close call.
@@ -162,6 +164,7 @@ Required behavior coverage in `trackerwrite/trackerwrite_test.go`:
 - `TestWriterWithCommentAndTransitionAdvertisesAllSupportedOps`: unsupported link_pr message includes `supported ops: [close, transition, comment]`.
 - `TestRunCommentWriterErrors`: deadline, canceled, and generic writer errors map to timeout, canceled, and unknown.
 - `TestInvokableRunComment`: JSON payload with `op=comment` succeeds when the writer supports comments.
+- Schema/Info description assertions: `body` no longer contains `post-v1`; the `op` description mentions optional comment support; `Info.Desc` mentions optional comment support and still makes `link_pr` unsupported.
 - Existing `op=link_pr` unsupported tests still pass.
 
 Update existing tests that currently put `OpComment` in generic unsupported loops so they reflect the writer capability being exercised. For close-only writers, `OpComment` should remain unsupported. For comment-capable writers, it should be routed.
@@ -173,6 +176,7 @@ Update `CHANGELOG.md`:
 - Add an `Unreleased` entry for optional `tracker.CommentWriter` support.
 - Update the pending `v0.1.0` trackerwrite bullet so it no longer says comments are unsupported.
 - Update migration notes that currently say consumers needing comments must keep those operations in their own tracker layer.
+- If cutting `v0.1.0`, make the changelog release-consistent before tagging: change `## v0.1.0 - Pending` to `## v0.1.0 - YYYY-MM-DD`, remove or move any entries from `Unreleased` that are included in the tag, and do not leave the tagged section marked `Pending`.
 
 Update `docs/inventory/trackerwrite.md` if the inventory is still maintained:
 
@@ -210,7 +214,9 @@ bd dolt push
 git push
 ```
 
-If the release owner approves `v0.1.0`, create and push the tag from the pushed implementation commit:
+The request strongly prefers the first tag, but this plan does not by itself grant release authority. Before tagging, get explicit user/release-owner approval in the implementation session. If approval is not available, do not block the upstream code landing: record `tag not approved in this session` in the bead and hand off the pushed commit SHA.
+
+If explicit approval is granted for `v0.1.0`, first confirm the changelog is release-consistent as described above, then create and push the tag from the pushed implementation commit:
 
 ```bash
 git tag -a v0.1.0 -m "Release v0.1.0"
@@ -256,4 +262,3 @@ git status
 ```
 
 The final `git status` must show the branch up to date with origin.
-

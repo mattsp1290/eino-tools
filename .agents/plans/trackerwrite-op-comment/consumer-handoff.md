@@ -37,7 +37,7 @@ go get github.com/mattsp1290/eino-tools@<tag-or-commit>
 go mod tidy
 ```
 
-The preferred tag is the first release tag, likely `v0.1.0`, if the release owner approves it. If no tag is cut, use the pushed implementation commit SHA.
+The preferred tag is the first release tag, likely `v0.1.0`, if the release owner explicitly approves it in the implementation session. If no tag is cut, use the pushed implementation commit SHA and record that no tag was approved.
 
 ## Follow-up Work in `local-symphony`
 
@@ -52,4 +52,3 @@ The preferred tag is the first release tag, likely `v0.1.0`, if the release owne
 `eino-tools` maps non-context comment writer errors through `failedFromWriterErr`, which currently yields `unknown` for generic errors. Consumer idempotency should treat a failed comment write as possibly already posted unless the consumer's own tracker layer can prove otherwise.
 
 `unsupported_op` is terminal and non-retryable. If the consumer sees `unsupported_op` for `op=comment`, it likely passed a writer that does not satisfy `tracker.CommentWriter` or pinned an older `eino-tools` version.
-
