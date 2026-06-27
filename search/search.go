@@ -542,6 +542,9 @@ func parseStream(r io.Reader, opts parseOptions) ([]Match, bool, string, error) 
 		switch ev.Type {
 		case "match":
 			if len(matches) >= opts.limit {
+				if lastMatchIndex >= 0 {
+					attachTrailingContext(matches, lastMatchIndex, pendingContext, opts.contextLines)
+				}
 				return matches, true, "matches", nil
 			}
 			m := buildMatch(data, opts.includeSubmatches)

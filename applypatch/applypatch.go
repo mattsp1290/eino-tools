@@ -523,11 +523,25 @@ func markTarget(seen map[string]string, rel, op string) *ResultError {
 		return &ResultError{Category: ErrCategoryValidation, Message: "target path is required"}
 	}
 	cleaned := filepath.ToSlash(filepath.Clean(rel))
-	if prior, ok := seen[cleaned]; ok {
-		return &ResultError{Category: ErrCategoryValidation, Message: fmt.Sprintf("duplicate target path %q in %s and %s operations", rel, prior, op)}
+	for existing, prior := range seen {
+		switch {
+		case existing == cleaned:
+			return &ResultError{Category: ErrCategoryValidation, Message: fmt.Sprintf("duplicate target path %q in %s and %s operations", rel, prior, op)}
+		case isPathPrefix(existing, cleaned):
+			return &ResultError{Category: ErrCategoryValidation, Message: fmt.Sprintf("target path %q is inside previously planned target %q", rel, existing)}
+		case isPathPrefix(cleaned, existing):
+			return &ResultError{Category: ErrCategoryValidation, Message: fmt.Sprintf("target path %q contains previously planned target %q", rel, existing)}
+		}
 	}
 	seen[cleaned] = op
 	return nil
+}
+
+func isPathPrefix(parent, child string) bool {
+	if parent == "." || child == "." {
+		return parent == "." && child != "."
+	}
+	return strings.HasPrefix(child, parent+"/")
 }
 
 func normalizePatchText(s string) string {

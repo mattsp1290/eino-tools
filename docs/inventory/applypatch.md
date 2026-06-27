@@ -61,7 +61,7 @@ is supported in this version.
 Before any write starts, `apply_patch`:
 
 - parses the whole patch;
-- rejects duplicate target paths;
+- rejects duplicate target paths and parent/child planned target conflicts;
 - rejects path escapes and symlink escapes;
 - rejects missing update/delete sources;
 - rejects existing add/move targets;

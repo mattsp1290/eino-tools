@@ -157,6 +157,50 @@ func TestReadLineWindowIgnoresSkippedLongLineTruncation(t *testing.T) {
 	}
 }
 
+func TestReadLineWindowBoundsVeryLongLine(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "minified.txt"), []byte(strings.Repeat("x", MaxReadLineBytes*8)), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	read := mustNewReadTool(t, workspace)
+	offset := 1
+	limit := 1
+
+	res := read.Run(context.Background(), ReadArgs{Path: "minified.txt", Offset: &offset, Limit: &limit})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, err=%+v", res.Outcome, res.Error)
+	}
+	if !res.LineTruncated || !strings.Contains(res.Content, "...(line truncated)") {
+		t.Fatalf("long line was not truncated: %+v", res)
+	}
+	if res.ContentBytes > MaxReadLineBytes+len("...(line truncated)") {
+		t.Fatalf("ContentBytes = %d, want bounded line result", res.ContentBytes)
+	}
+}
+
+func TestReadLineWindowCRLFBoundaryDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	line := strings.Repeat("x", MaxReadLineBytes-1) + "\r\n"
+	if err := os.WriteFile(filepath.Join(workspace, "crlf.txt"), []byte(line), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	read := mustNewReadTool(t, workspace)
+	offset := 1
+	limit := 1
+
+	res := read.Run(context.Background(), ReadArgs{Path: "crlf.txt", Offset: &offset, Limit: &limit})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, err=%+v", res.Outcome, res.Error)
+	}
+	if res.LineTruncated || res.Content != line {
+		t.Fatalf("unexpected CRLF boundary result: line_truncated=%t content_len=%d", res.LineTruncated, len(res.Content))
+	}
+}
+
 func TestReadBinaryFails(t *testing.T) {
 	t.Parallel()
 

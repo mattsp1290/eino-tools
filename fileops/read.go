@@ -17,6 +17,8 @@ import (
 	"github.com/mattsp1290/eino-tools/result"
 )
 
+var errBinaryText = errors.New("binary or non-UTF-8 text")
+
 // ReadArgs is the parsed input for file_read.
 type ReadArgs struct {
 	// Path is the workspace-relative file to read. Required.
@@ -283,10 +285,10 @@ func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved st
 			}
 		}
 
-		line, readErr := reader.ReadString('\n')
+		line, wasLineTruncated, readErr := readBoundedLine(reader)
 		if len(line) > 0 {
 			totalLines++
-			if strings.ContainsRune(line, 0) || !utf8.ValidString(line) {
+			if errors.Is(readErr, errBinaryText) {
 				return ReadResult{
 					BaseResult: failed(ErrCategoryBinary,
 						fmt.Sprintf("file %q appears to be binary or non-UTF-8 text", args.Path)),
@@ -294,8 +296,7 @@ func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved st
 				}
 			}
 			if totalLines >= offset && totalLines < offset+limit && !byteCapHit {
-				retained, wasLineTruncated := truncateReadLine(line)
-				if contentBytes+len(retained) > MaxOutputBytes {
+				if contentBytes+len(line) > MaxOutputBytes {
 					byteCapHit = true
 					truncated = true
 					truncReason = "bytes"
@@ -306,11 +307,18 @@ func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved st
 							truncReason = "line"
 						}
 					}
-					content.WriteString(retained)
-					numbered.WriteString(fmt.Sprintf("%d: %s", totalLines, retained))
-					contentBytes += len(retained)
+					content.WriteString(line)
+					numbered.WriteString(fmt.Sprintf("%d: %s", totalLines, line))
+					contentBytes += len(line)
 					lineEnd = totalLines
 				}
+			}
+		}
+		if errors.Is(readErr, errBinaryText) {
+			return ReadResult{
+				BaseResult: failed(ErrCategoryBinary,
+					fmt.Sprintf("file %q appears to be binary or non-UTF-8 text", args.Path)),
+				Path: args.Path,
 			}
 		}
 		if readErr == nil {
@@ -365,6 +373,66 @@ func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved st
 	}
 }
 
+func readBoundedLine(reader *bufio.Reader) (string, bool, error) {
+	var body strings.Builder
+	body.Grow(min(MaxReadLineBytes, 1024))
+	bodyBytes := 0
+	readAny := false
+	truncated := false
+	pendingCR := false
+
+	appendRune := func(r rune, size int) {
+		if bodyBytes+size > MaxReadLineBytes {
+			truncated = true
+			return
+		}
+		body.WriteRune(r)
+		bodyBytes += size
+	}
+
+	for {
+		r, size, err := reader.ReadRune()
+		if err != nil {
+			if errors.Is(err, io.EOF) && readAny {
+				if pendingCR {
+					appendRune('\r', 1)
+				}
+				return finishBoundedLine(body.String(), "", truncated), truncated, nil
+			}
+			return "", false, err
+		}
+		readAny = true
+		if r == utf8.RuneError && size == 1 {
+			return "", false, errBinaryText
+		}
+		if r == 0 {
+			return "", false, errBinaryText
+		}
+		if pendingCR {
+			if r == '\n' {
+				return finishBoundedLine(body.String(), "\r\n", truncated), truncated, nil
+			}
+			appendRune('\r', 1)
+			pendingCR = false
+		}
+		if r == '\r' {
+			pendingCR = true
+			continue
+		}
+		if r == '\n' {
+			return finishBoundedLine(body.String(), "\n", truncated), truncated, nil
+		}
+		appendRune(r, size)
+	}
+}
+
+func finishBoundedLine(body, lineEnding string, truncated bool) string {
+	if !truncated {
+		return body + lineEnding
+	}
+	return trimUTF8(body) + "...(line truncated)" + lineEnding
+}
+
 // Info returns the eino [*schema.ToolInfo] describing file_read's
 // name, human-facing description, and JSON Schema for arguments.
 // Called by eino at graph compile time; the ReAct loop uses Desc as
@@ -416,25 +484,6 @@ func containsNUL(p []byte) bool {
 		}
 	}
 	return false
-}
-
-func truncateReadLine(line string) (string, bool) {
-	if len(line) <= MaxReadLineBytes {
-		return line, false
-	}
-	hasNewline := strings.HasSuffix(line, "\n")
-	body := line
-	lineEnding := ""
-	if hasNewline {
-		lineEnding = "\n"
-		body = strings.TrimSuffix(body, "\n")
-		if strings.HasSuffix(body, "\r") {
-			body = strings.TrimSuffix(body, "\r")
-			lineEnding = "\r\n"
-		}
-	}
-	body = trimUTF8(body[:MaxReadLineBytes])
-	return body + "...(line truncated)" + lineEnding, true
 }
 
 func trimUTF8(s string) string {

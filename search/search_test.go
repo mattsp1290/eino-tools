@@ -276,6 +276,24 @@ func TestRunContextLinesAttachToNearestMatchSide(t *testing.T) {
 	}
 }
 
+func TestRunLimitPreservesTrailingContextForReturnedMatch(t *testing.T) {
+	t.Parallel()
+
+	tool, root := newTestTool(t)
+	writeFile(t, root, "limited-context.txt", "match one\nafter one\nmatch two\n")
+
+	res := tool.Run(context.Background(), Args{Pattern: "match", Path: "limited-context.txt", Context: 1, Limit: 1})
+	if res.Outcome != result.OutcomeSucceeded {
+		t.Fatalf("Outcome = %q, want succeeded (err=%+v)", res.Outcome, res.Error)
+	}
+	if !res.Truncated || res.TruncationReason != "matches" || res.MatchCount != 1 {
+		t.Fatalf("truncation = %t/%q count=%d", res.Truncated, res.TruncationReason, res.MatchCount)
+	}
+	if len(res.Matches[0].After) != 1 || res.Matches[0].After[0].Line != "after one" {
+		t.Fatalf("after context = %+v", res.Matches[0].After)
+	}
+}
+
 func TestRunLimitTruncates(t *testing.T) {
 	t.Parallel()
 

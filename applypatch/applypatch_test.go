@@ -166,6 +166,28 @@ func TestRunRejectsDuplicateTargetsAndPathEscapes(t *testing.T) {
 	assertCategory(t, tool.Run(context.Background(), Args{PatchText: escape}), ErrCategoryPathEscape)
 }
 
+func TestRunRejectsParentChildTargetsBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	tool, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	patch := `*** Begin Patch
+*** Add File: foo
++plain file
+*** Add File: foo/bar.txt
++nested file
+*** End Patch
+`
+	res := tool.Run(context.Background(), Args{PatchText: patch})
+	assertCategory(t, res, ErrCategoryValidation)
+	if _, err := os.Stat(filepath.Join(root, "foo")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("foo was written despite preflight failure or stat failed unexpectedly: %v", err)
+	}
+}
+
 func TestRunRejectsExistingAddMissingUpdateAndMissingDelete(t *testing.T) {
 	t.Parallel()
 
