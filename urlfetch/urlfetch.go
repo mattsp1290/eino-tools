@@ -216,8 +216,8 @@ func (t *Tool) runHTTPS(ctx context.Context, rawURL string) Result {
 	}
 }
 
-// Info returns the Eino ToolInfo for urlfetch.
-func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// ToolInfo returns fresh, instance-independent metadata for urlfetch.
+func ToolInfo() (*schema.ToolInfo, error) {
 	js := &jsonschema.Schema{}
 	if err := json.Unmarshal([]byte(schemaJSON), js); err != nil {
 		return nil, fmt.Errorf("urlfetch: parse tool schema: %w", err)
@@ -227,6 +227,11 @@ func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
 		Desc:        "Fetch the raw text content of a file:// or https:// URL and return it as a string. Supported schemes: file:// (local filesystem) and https://. Fails fast with a structured error if the resource does not exist or is not accessible. Does not follow redirects beyond the standard library's defaults. Does not parse HTML, strip CSS, or interpret JavaScript.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
+}
+
+// Info returns the Eino ToolInfo for urlfetch.
+func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return ToolInfo()
 }
 
 // InvokableRun is the Eino tool entry point.

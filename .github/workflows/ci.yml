@@ -75,6 +75,17 @@ jobs:
             fi
           done
 
+          if rg -n '"github\.com/mattsp1290/eino-agent(/[^" ]*)?"' catalog --glob '*.go'; then
+            echo "forbidden eino-agent import in catalog source" >&2
+            exit 1
+          fi
+
+          catalog_deps="$(go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' -deps ./catalog)"
+          if grep -E '^github\.com/mattsp1290/eino-agent(/|$)' <<<"$catalog_deps"; then
+            echo "forbidden eino-agent dependency in ./catalog" >&2
+            exit 1
+          fi
+
           tracker_beads_deps="$(go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' -deps ./tracker/beads)"
           if ! grep -q '^github.com/mattsp1290/beads-go/beads$' <<<"$tracker_beads_deps"; then
             echo "tracker/beads does not import beads-go SDK" >&2
@@ -84,6 +95,23 @@ jobs:
             echo "forbidden dependency in ./tracker/beads" >&2
             exit 1
           fi
+
+  catalog-windows:
+    name: Catalog contract (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.x
+          cache: true
+
+      - name: Test portable catalog contract
+        run: go test ./catalog
 
   tracker-beads-integration:
     name: Tracker Beads Integration

@@ -165,8 +165,8 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	return t.commit(ctx, planned, fileResults)
 }
 
-// Info returns the Eino ToolInfo for apply_patch.
-func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// ToolInfo returns fresh, instance-independent metadata for apply_patch.
+func ToolInfo() (*schema.ToolInfo, error) {
 	js := &jsonschema.Schema{}
 	if err := json.Unmarshal([]byte(schemaJSON), js); err != nil {
 		return nil, fmt.Errorf("applypatch: parse tool schema: %w", err)
@@ -176,6 +176,11 @@ func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
 		Desc:        "Apply a multi-file structured patch under the workspace. Supports add, update, delete, and move. Preflights every target before writing and returns per-file operation summaries; partial=true is reserved for commit-time failures after preflight.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
+}
+
+// Info returns the Eino ToolInfo for apply_patch.
+func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return ToolInfo()
 }
 
 // InvokableRun is the Eino tool entry point.

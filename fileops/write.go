@@ -160,11 +160,16 @@ func (t *WriteTool) Run(ctx context.Context, args WriteArgs) WriteResult {
 	}
 }
 
-// Info returns the eino [*schema.ToolInfo] for file_write.
-func (t *WriteTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// WriteToolInfo returns fresh, instance-independent metadata for file_write.
+func WriteToolInfo() (*schema.ToolInfo, error) {
 	return buildToolInfo(NameWrite,
 		"Write (create or overwrite) a workspace-relative file. Content is capped at 256 KiB. Optional create_dirs=true mkdir -p's the parent chain. Returns a structured error envelope on path_escape, not_found (missing parent), too_large, or io.",
 		[]byte(writeSchemaJSON))
+}
+
+// Info returns the eino [*schema.ToolInfo] for file_write.
+func (t *WriteTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return WriteToolInfo()
 }
 
 // InvokableRun is the eino-friendly entry point. opts is ignored —

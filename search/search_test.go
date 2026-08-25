@@ -52,6 +52,31 @@ func TestNewRejectsInvalidWorkspace(t *testing.T) {
 	}
 }
 
+func TestNewCapturesExecutionOptions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	environment := []string{"PATH=/bin", "SEARCH_MARKER=one"}
+	tool, err := New(root, Options{
+		RGBinary:      "/bin/echo",
+		Env:           environment,
+		DisableConfig: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	environment[1] = "SEARCH_MARKER=two"
+	if tool.rgBinary != "/bin/echo" || !tool.disableConfig {
+		t.Fatalf("captured options = %+v", tool)
+	}
+	if got := tool.env[1]; got != "SEARCH_MARKER=one" {
+		t.Fatalf("captured environment = %q", got)
+	}
+	if _, err := New(root, Options{}, Options{}); err == nil {
+		t.Fatal("New accepted multiple Options values")
+	}
+}
+
 func TestRunPathDefaultsToWorkspaceRoot(t *testing.T) {
 	t.Parallel()
 

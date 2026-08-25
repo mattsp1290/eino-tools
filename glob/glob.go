@@ -275,8 +275,8 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	}
 }
 
-// Info returns the Eino ToolInfo for glob.
-func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// ToolInfo returns fresh, instance-independent metadata for glob.
+func ToolInfo() (*schema.ToolInfo, error) {
 	js := &jsonschema.Schema{}
 	if err := json.Unmarshal([]byte(schemaJSON), js); err != nil {
 		return nil, fmt.Errorf("glob: parse tool schema: %w", err)
@@ -286,6 +286,11 @@ func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
 		Desc:        "Discover workspace-relative paths with doublestar glob semantics (*, ?, **). Hidden files are included by default; VCS internals are skipped. Results are sorted, capped, and returned with is_dir metadata.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
+}
+
+// Info returns the Eino ToolInfo for glob.
+func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return ToolInfo()
 }
 
 // InvokableRun is the Eino tool entry point.

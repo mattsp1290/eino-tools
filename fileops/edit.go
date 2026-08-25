@@ -224,11 +224,16 @@ func (t *EditTool) Run(ctx context.Context, args EditArgs) EditResult {
 	}
 }
 
-// Info returns the eino [*schema.ToolInfo] for file_edit.
-func (t *EditTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// EditToolInfo returns fresh, instance-independent metadata for file_edit.
+func EditToolInfo() (*schema.ToolInfo, error) {
 	return buildToolInfo(NameEdit,
 		"Edit a workspace-relative file in place by anchored substring replacement. The anchor MUST appear exactly once in the file. Returns structured error envelopes on path_escape, not_found, is_directory, anchor_not_found, anchor_ambiguous, too_large, or io.",
 		[]byte(editSchemaJSON))
+}
+
+// Info returns the eino [*schema.ToolInfo] for file_edit.
+func (t *EditTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return EditToolInfo()
 }
 
 // InvokableRun is the eino-friendly entry point. opts is ignored —

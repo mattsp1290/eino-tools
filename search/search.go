@@ -160,10 +160,12 @@ func (r Result) IsRetryable() bool {
 type Tool struct {
 	workspacePath string
 	rgBinary      string
+	env           []string
+	disableConfig bool
 }
 
 // New constructs a Tool from an absolute, resolvable workspace path.
-func New(workspacePath string) (*Tool, error) {
+func New(workspacePath string, opts ...Options) (*Tool, error) {
 	if workspacePath == "" {
 		return nil, errors.New("search: workspace path is required")
 	}
@@ -174,7 +176,16 @@ func New(workspacePath string) (*Tool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("search: resolve workspace path %q: %w", workspacePath, err)
 	}
-	return &Tool{workspacePath: resolved, rgBinary: defaultRgBinary}, nil
+	options, err := resolveOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &Tool{
+		workspacePath: resolved,
+		rgBinary:      options.RGBinary,
+		env:           options.Env,
+		disableConfig: options.DisableConfig,
+	}, nil
 }
 
 const schemaJSON = `{
@@ -303,6 +314,9 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	defer cancel()
 
 	rgArgs := []string{"--json"}
+	if t.disableConfig {
+		rgArgs = append(rgArgs, "--no-config")
+	}
 	if args.Literal {
 		rgArgs = append(rgArgs, "-F")
 	}
@@ -323,6 +337,7 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	cmd := exec.CommandContext(runCtx, t.rgBinary, rgArgs...) //nolint:gosec
 	cmd.Dir = t.workspacePath
 	cmd.Stdin = bytes.NewReader(nil)
+	cmd.Env = t.env
 	cmd.WaitDelay = waitDelayAfterCancel
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -425,8 +440,8 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	}
 }
 
-// Info returns the Eino ToolInfo for search.
-func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// ToolInfo returns fresh, instance-independent metadata for search.
+func ToolInfo() (*schema.ToolInfo, error) {
 	js := &jsonschema.Schema{}
 	if err := json.Unmarshal([]byte(schemaJSON), js); err != nil {
 		return nil, fmt.Errorf("search: parse tool schema: %w", err)
@@ -436,6 +451,11 @@ func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
 		Desc:        "Search workspace files via ripgrep. Defaults to regex mode and preserves existing pattern/path/timeout behavior. Optional glob filters, literal mode, ignore-case mode, context lines, and match limit are supported. Per-call timeout defaults to 60s and is capped at 600s.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
+}
+
+// Info returns the Eino ToolInfo for search.
+func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return ToolInfo()
 }
 
 // InvokableRun is the Eino tool entry point.

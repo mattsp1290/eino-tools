@@ -261,8 +261,8 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	}
 }
 
-// Info returns the Eino ToolInfo for tracker_write.
-func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// ToolInfo returns fresh, instance-independent metadata for tracker_write.
+func ToolInfo() (*schema.ToolInfo, error) {
 	js := &jsonschema.Schema{}
 	if err := json.Unmarshal([]byte(schemaJSON), js); err != nil {
 		return nil, fmt.Errorf("tracker_write: parse tool schema: %w", err)
@@ -272,6 +272,11 @@ func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
 		Desc:        "Mutate the issue tracker. v1 implements op=close and can implement op=transition and op=comment when the configured writer supports those capabilities. Unsupported ops such as op=link_pr return tool_failed{error.category=unsupported_op}.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
+}
+
+// Info returns the Eino ToolInfo for tracker_write.
+func (t *Tool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return ToolInfo()
 }
 
 // InvokableRun is the Eino tool entry point.

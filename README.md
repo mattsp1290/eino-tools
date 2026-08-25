@@ -24,6 +24,8 @@ agent workers.
 - `urlfetch`: `url_fetch` tool; fetches raw text from `file://` or `https://` URLs.
 - `userinteract`: `user_interact` tool; asks the user a question and returns their
   answer; works in CLI (blocking stdin) and MCP (non-blocking pending/answer) modes.
+- `catalog`: deterministic metadata, identity, safety declarations, and fresh
+  factories for the standard leaf-tool set.
 
 ## Requirements
 
@@ -117,6 +119,23 @@ res := shellTool.Run(ctx, shell.Args{Cmd: "go test ./...", TimeoutSeconds: 60})
 ```
 
 ```go
+definitions, err := catalog.Standard(catalog.Options{})
+if err != nil {
+	return err
+}
+info, err := definitions[0].Info() // no workspace or fake root required
+if err != nil {
+	return err
+}
+
+// The host admits and canonicalizes the root, then supplies it only when the
+// frozen registration is materialized.
+leaf, err := definitions[0].New(ctx, catalog.Instance{WorkspaceRoot: canonicalRoot})
+_ = info
+_ = leaf
+```
+
+```go
 type closer struct{}
 
 func (closer) Close(ctx context.Context, id, reason string) error {
@@ -154,6 +173,16 @@ validate-then-use path containment. Consumers that run multiple tool calls
 against the same workspace must serialize those filesystem calls per workspace
 root. Independent workspace roots may run concurrently. A future openat-style
 implementation can relax this contract.
+
+The standard `catalog` marks every workspace definition `Concurrent=false`, so
+the host must use one shared keyed lock for all catalog workspace tools bound to
+the same canonical root; the catalog does not provide that lock. Leaf binding
+is separate from host global/session mount scope. A static binding also does not
+mean permission-free: `url_fetch` can access HTTPS and absolute `file://` paths.
+
+The full standard catalog executes on Unix. On non-Unix platforms its public
+types remain available, while `catalog.Standard` returns
+`catalog.ErrUnsupportedPlatform` and no definitions.
 
 `shell` intentionally runs model-provided commands as `sh -lc <cmd>` in the
 configured workspace. The package sets cwd, stdin, output caps, timeout, and

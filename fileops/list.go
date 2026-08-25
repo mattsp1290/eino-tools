@@ -257,11 +257,16 @@ func (t *ListTool) Run(ctx context.Context, args ListArgs) ListResult {
 	}
 }
 
-// Info returns the eino [*schema.ToolInfo] for file_list.
-func (t *ListTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// ListToolInfo returns fresh, instance-independent metadata for file_list.
+func ListToolInfo() (*schema.ToolInfo, error) {
 	return buildToolInfo(NameList,
 		"List directory entries under a workspace-relative path (empty or \".\" lists the workspace root). Output is sorted and capped at 5000 entries; oversize results set truncated=true.",
 		[]byte(listSchemaJSON))
+}
+
+// Info returns the eino [*schema.ToolInfo] for file_list.
+func (t *ListTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return ListToolInfo()
 }
 
 // InvokableRun is the eino-friendly entry point. opts is ignored —

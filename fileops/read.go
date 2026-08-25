@@ -436,14 +436,17 @@ func finishBoundedLine(body, lineEnding string, truncated bool) string {
 	return trimUTF8(body) + "...(line truncated)" + lineEnding
 }
 
-// Info returns the eino [*schema.ToolInfo] describing file_read's
-// name, human-facing description, and JSON Schema for arguments.
-// Called by eino at graph compile time; the ReAct loop uses Desc as
-// the function description the model sees.
-func (t *ReadTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+// ReadToolInfo returns fresh, instance-independent metadata for file_read.
+func ReadToolInfo() (*schema.ToolInfo, error) {
 	return buildToolInfo(NameRead,
 		"Read a workspace-relative UTF-8 text file. Plain {path} calls return the leading content prefix capped at 256 KiB. Supplying offset and/or limit returns a line-window with raw and numbered content. Returns structured errors including path_escape, not_found, is_directory, binary, validation, and io.",
 		[]byte(readSchemaJSON))
+}
+
+// Info returns the eino [*schema.ToolInfo] describing file_read's
+// name, human-facing description, and JSON Schema for arguments.
+func (t *ReadTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return ReadToolInfo()
 }
 
 // InvokableRun is the eino-friendly entry point. The variadic

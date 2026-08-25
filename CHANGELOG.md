@@ -6,6 +6,13 @@ This project uses a hand-curated changelog.
 
 ### Added
 
+- A deterministic `catalog.Standard` provider for the standard leaf set, with
+  explicit registration IDs, metadata-only accessors, binding and safety
+  declarations, fresh factories, and schema/executor identity hashes.
+- Instance-independent `ToolInfo` builders in every leaf package.
+- Injectable ripgrep executable, environment, and config-disabling options for
+  `search`, allowing catalog execution provenance to be captured once.
+
 - `glob` tool for doublestar path discovery under a workspace, including hidden
   paths by default while skipping VCS internals.
 - `apply_patch` tool for multi-file add/update/delete/move patches with
@@ -28,6 +35,15 @@ This project uses a hand-curated changelog.
   metadata while preserving existing calls.
 
 ### Migration Notes
+
+- `eino-agent` must translate catalog definitions into its composition registry
+  and compose both leaf hashes into its persisted schema/executor identities.
+  After that external adoption is tested, it can delete the disconnected
+  `tools/einotools.RegisterDefaults` helper. This repository does not implement
+  that consumer migration.
+- Executor revisions are per registration ID. Increment only the affected
+  revision when execution semantics change; model-visible metadata changes
+  update the corresponding schema-hash golden.
 
 - `eino-agent` must serialize workspace filesystem tools per workspace root:
   `fileops`, `glob`, `search`, and `apply_patch`. Independent workspace roots
