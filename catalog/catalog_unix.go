@@ -8,11 +8,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -28,25 +26,17 @@ import (
 	"github.com/mattsp1290/eino-tools/userinteract"
 )
 
-const (
-	revisionFileRead     = 1
-	revisionFileWrite    = 1
-	revisionFileEdit     = 1
-	revisionFileList     = 1
-	revisionGlob         = 1
-	revisionSearch       = 1
-	revisionApplyPatch   = 1
-	revisionShell        = 1
-	revisionURLFetch     = 1
-	revisionUserInteract = 1
-	revisionTrackerWrite = 1
-)
-
-type capturedExecutable struct {
-	kind          string
-	path          string
-	contentSHA256 string
-	environment   string
+type definitionSpec struct {
+	id           string
+	revision     int
+	name         string
+	binding      BindingKind
+	retrySafe    bool
+	concurrent   bool
+	dependencies []executorDependency
+	environment  string
+	info         func() (*schema.ToolInfo, error)
+	newTool      func(context.Context, Instance) (tool.InvokableTool, error)
 }
 
 // Standard returns the complete validated standard catalog in stable order.
@@ -94,15 +84,6 @@ func Standard(options Options) ([]Definition, error) {
 		urlOptions = &copy
 	}
 
-	definitions := make([]Definition, 0, 11)
-	appendDefinition := func(def Definition, err error) error {
-		if err != nil {
-			return err
-		}
-		definitions = append(definitions, def)
-		return nil
-	}
-
 	workspace := func(construct func(string) (tool.InvokableTool, error)) func(context.Context, Instance) (tool.InvokableTool, error) {
 		return func(ctx context.Context, instance Instance) (tool.InvokableTool, error) {
 			if err := ctx.Err(); err != nil {
@@ -116,42 +97,12 @@ func Standard(options Options) ([]Definition, error) {
 		}
 	}
 
-	if err := appendDefinition(makeDefinition(IDFileRead, fileops.NameRead, BindingWorkspace, true, false, nil, "", fileops.ReadToolInfo,
-		workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewReadTool(root) }))); err != nil {
-		return nil, err
-	}
-	if err := appendDefinition(makeDefinition(IDFileWrite, fileops.NameWrite, BindingWorkspace, false, false, nil, "", fileops.WriteToolInfo,
-		workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewWriteTool(root) }))); err != nil {
-		return nil, err
-	}
-	if err := appendDefinition(makeDefinition(IDFileEdit, fileops.NameEdit, BindingWorkspace, false, false, nil, "", fileops.EditToolInfo,
-		workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewEditTool(root) }))); err != nil {
-		return nil, err
-	}
-	if err := appendDefinition(makeDefinition(IDFileList, fileops.NameList, BindingWorkspace, true, false, nil, "", fileops.ListToolInfo,
-		workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewListTool(root) }))); err != nil {
-		return nil, err
-	}
-	if err := appendDefinition(makeDefinition(IDGlob, glob.Name, BindingWorkspace, true, false, nil, "", glob.ToolInfo,
-		workspace(func(root string) (tool.InvokableTool, error) { return glob.New(root) }))); err != nil {
-		return nil, err
-	}
-
 	searchFactory := workspace(func(root string) (tool.InvokableTool, error) {
 		if err := verifyExecutable(searchExecutable); err != nil {
 			return nil, err
 		}
 		return search.New(root, searchOptions)
 	})
-	if err := appendDefinition(makeDefinition(IDSearch, search.Name, BindingWorkspace, true, false,
-		[]executorDependency{searchExecutable.dependency()}, searchExecutable.environment, search.ToolInfo, searchFactory)); err != nil {
-		return nil, err
-	}
-
-	if err := appendDefinition(makeDefinition(IDApplyPatch, applypatch.Name, BindingWorkspace, false, false, nil, "", applypatch.ToolInfo,
-		workspace(func(root string) (tool.InvokableTool, error) { return applypatch.New(root) }))); err != nil {
-		return nil, err
-	}
 
 	shellFactory := workspace(func(root string) (tool.InvokableTool, error) {
 		if err := verifyExecutable(shellExecutable); err != nil {
@@ -159,10 +110,6 @@ func Standard(options Options) ([]Definition, error) {
 		}
 		return shell.New(root, shellOptions)
 	})
-	if err := appendDefinition(makeDefinition(IDShell, shell.Name, BindingWorkspace, false, false,
-		[]executorDependency{shellExecutable.dependency()}, shellExecutable.environment, shell.ToolInfo, shellFactory)); err != nil {
-		return nil, err
-	}
 
 	static := func(construct func() (tool.InvokableTool, error)) func(context.Context, Instance) (tool.InvokableTool, error) {
 		return func(ctx context.Context, _ Instance) (tool.InvokableTool, error) {
@@ -178,18 +125,45 @@ func Standard(options Options) ([]Definition, error) {
 		}
 		return urlfetch.New(*urlOptions)
 	})
-	if err := appendDefinition(makeDefinition(IDURLFetch, urlfetch.Name, BindingStatic, true, true, nil, "", urlfetch.ToolInfo, urlFactory)); err != nil {
-		return nil, err
-	}
 	userFactory := static(func() (tool.InvokableTool, error) { return userinteract.New(userSurface, userOptions) })
-	if err := appendDefinition(makeDefinition(IDUserInteract, userinteract.Name, BindingStatic, false, false, nil, "", userinteract.ToolInfo, userFactory)); err != nil {
-		return nil, err
+
+	specs := []definitionSpec{
+		{id: IDFileRead, revision: 1, name: fileops.NameRead, binding: BindingWorkspace, retrySafe: true, info: fileops.ReadToolInfo,
+			newTool: workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewReadTool(root) })},
+		{id: IDFileWrite, revision: 1, name: fileops.NameWrite, binding: BindingWorkspace, info: fileops.WriteToolInfo,
+			newTool: workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewWriteTool(root) })},
+		{id: IDFileEdit, revision: 1, name: fileops.NameEdit, binding: BindingWorkspace, info: fileops.EditToolInfo,
+			newTool: workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewEditTool(root) })},
+		{id: IDFileList, revision: 1, name: fileops.NameList, binding: BindingWorkspace, retrySafe: true, info: fileops.ListToolInfo,
+			newTool: workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewListTool(root) })},
+		{id: IDGlob, revision: 1, name: glob.Name, binding: BindingWorkspace, retrySafe: true, info: glob.ToolInfo,
+			newTool: workspace(func(root string) (tool.InvokableTool, error) { return glob.New(root) })},
+		{id: IDSearch, revision: 1, name: search.Name, binding: BindingWorkspace, retrySafe: true,
+			dependencies: searchExecutable.dependencies(), environment: searchExecutable.environment, info: search.ToolInfo, newTool: searchFactory},
+		{id: IDApplyPatch, revision: 1, name: applypatch.Name, binding: BindingWorkspace, info: applypatch.ToolInfo,
+			newTool: workspace(func(root string) (tool.InvokableTool, error) { return applypatch.New(root) })},
+		{id: IDShell, revision: 1, name: shell.Name, binding: BindingWorkspace,
+			dependencies: shellExecutable.dependencies(), environment: shellExecutable.environment, info: shell.ToolInfo, newTool: shellFactory},
+		{id: IDURLFetch, revision: 1, name: urlfetch.Name, binding: BindingStatic, retrySafe: true, concurrent: true,
+			info: urlfetch.ToolInfo, newTool: urlFactory},
+		{id: IDUserInteract, revision: 1, name: userinteract.Name, binding: BindingStatic,
+			info: userinteract.ToolInfo, newTool: userFactory},
 	}
 	if trackerWriter != nil {
 		trackerFactory := static(func() (tool.InvokableTool, error) { return trackerwrite.New(trackerWriter) })
-		if err := appendDefinition(makeDefinition(IDTrackerWrite, trackerwrite.Name, BindingStatic, false, false, nil, "", trackerwrite.ToolInfo, trackerFactory)); err != nil {
+		specs = append(specs, definitionSpec{
+			id: IDTrackerWrite, revision: 1, name: trackerwrite.Name, binding: BindingStatic,
+			info: trackerwrite.ToolInfo, newTool: trackerFactory,
+		})
+	}
+
+	definitions := make([]Definition, 0, len(specs))
+	for _, spec := range specs {
+		definition, err := makeDefinition(spec)
+		if err != nil {
 			return nil, err
 		}
+		definitions = append(definitions, definition)
 	}
 
 	if err := validateDefinitions(definitions); err != nil {
@@ -198,59 +172,32 @@ func Standard(options Options) ([]Definition, error) {
 	return definitions, nil
 }
 
-func makeDefinition(id, name string, binding BindingKind, retrySafe, concurrent bool,
-	dependencies []executorDependency, environment string, info func() (*schema.ToolInfo, error),
-	newTool func(context.Context, Instance) (tool.InvokableTool, error),
-) (Definition, error) {
-	metadata, err := info()
+func makeDefinition(spec definitionSpec) (Definition, error) {
+	if spec.revision <= 0 {
+		return Definition{}, fmt.Errorf("catalog: executor revision for %s must be positive", spec.id)
+	}
+	if spec.info == nil {
+		return Definition{}, fmt.Errorf("catalog: metadata accessor for %s is nil", spec.id)
+	}
+	if spec.newTool == nil {
+		return Definition{}, fmt.Errorf("catalog: factory for %s is nil", spec.id)
+	}
+	metadata, err := spec.info()
 	if err != nil {
-		return Definition{}, fmt.Errorf("catalog: metadata for %s: %w", id, err)
+		return Definition{}, fmt.Errorf("catalog: metadata for %s: %w", spec.id, err)
 	}
 	schemaIdentity, err := schemaHash(metadata)
 	if err != nil {
-		return Definition{}, fmt.Errorf("catalog: schema identity for %s: %w", id, err)
+		return Definition{}, fmt.Errorf("catalog: schema identity for %s: %w", spec.id, err)
 	}
-	revision, err := executorRevision(id)
+	executorIdentity, err := executorHash(spec.id, spec.revision, spec.dependencies, spec.environment)
 	if err != nil {
-		return Definition{}, err
-	}
-	executorIdentity, err := executorHash(id, revision, dependencies, environment)
-	if err != nil {
-		return Definition{}, fmt.Errorf("catalog: executor identity for %s: %w", id, err)
+		return Definition{}, fmt.Errorf("catalog: executor identity for %s: %w", spec.id, err)
 	}
 	return Definition{
-		ID: id, Name: name, Binding: binding, RetrySafe: retrySafe, Concurrent: concurrent,
-		SchemaHash: schemaIdentity, ExecutorHash: executorIdentity, Info: info, New: newTool,
+		ID: spec.id, Name: spec.name, Binding: spec.binding, RetrySafe: spec.retrySafe, Concurrent: spec.concurrent,
+		SchemaHash: schemaIdentity, ExecutorHash: executorIdentity, Info: spec.info, New: spec.newTool,
 	}, nil
-}
-
-func executorRevision(id string) (int, error) {
-	switch id {
-	case IDFileRead:
-		return revisionFileRead, nil
-	case IDFileWrite:
-		return revisionFileWrite, nil
-	case IDFileEdit:
-		return revisionFileEdit, nil
-	case IDFileList:
-		return revisionFileList, nil
-	case IDGlob:
-		return revisionGlob, nil
-	case IDSearch:
-		return revisionSearch, nil
-	case IDApplyPatch:
-		return revisionApplyPatch, nil
-	case IDShell:
-		return revisionShell, nil
-	case IDURLFetch:
-		return revisionURLFetch, nil
-	case IDUserInteract:
-		return revisionUserInteract, nil
-	case IDTrackerWrite:
-		return revisionTrackerWrite, nil
-	default:
-		return 0, fmt.Errorf("catalog: no executor revision for %q", id)
-	}
 }
 
 func validateDefinitions(definitions []Definition) error {
@@ -329,177 +276,6 @@ func validateWorkspaceRoot(root string) (string, error) {
 		return "", fmt.Errorf("catalog: workspace root is not a directory: %q", root)
 	}
 	return root, nil
-}
-
-func captureSearchOptions(input *search.Options) (search.Options, capturedExecutable, error) {
-	options := search.Options{}
-	if input != nil {
-		options = *input
-		options.Env = append([]string(nil), input.Env...)
-	}
-	if options.RGBinary == "" {
-		options.RGBinary = "rg"
-	}
-	if options.Env == nil {
-		options.Env = os.Environ()
-	}
-	env, err := normalizeEnvironment(options.Env)
-	if err != nil {
-		return search.Options{}, capturedExecutable{}, fmt.Errorf("catalog: search environment: %w", err)
-	}
-	path, digest, err := resolveExecutable(options.RGBinary, env)
-	if err != nil {
-		return search.Options{}, capturedExecutable{}, fmt.Errorf("catalog: search executable: %w", err)
-	}
-	envDigest, err := hashJSON(env)
-	if err != nil {
-		return search.Options{}, capturedExecutable{}, err
-	}
-	options.RGBinary = path
-	options.Env = env
-	options.DisableConfig = true
-	return options, capturedExecutable{kind: "ripgrep", path: path, contentSHA256: digest, environment: envDigest}, nil
-}
-
-func captureShellOptions(input *shell.Options) (shell.Options, capturedExecutable, error) {
-	options := shell.Options{}
-	if input != nil {
-		options = *input
-		options.Env = append([]string(nil), input.Env...)
-	}
-	if options.OutputCapBytes < 0 {
-		return shell.Options{}, capturedExecutable{}, fmt.Errorf("catalog: shell output cap bytes must be non-negative, got %d", options.OutputCapBytes)
-	}
-	if options.OutputCapBytes == 0 {
-		options.OutputCapBytes = shell.DefaultOutputCapBytes
-	}
-	if options.ShellBinary == "" {
-		options.ShellBinary = shell.DefaultShellBinary
-	}
-	if options.Env == nil {
-		options.Env = os.Environ()
-	}
-	env, err := normalizeEnvironment(options.Env)
-	if err != nil {
-		return shell.Options{}, capturedExecutable{}, fmt.Errorf("catalog: shell environment: %w", err)
-	}
-	path, digest, err := resolveExecutable(options.ShellBinary, env)
-	if err != nil {
-		return shell.Options{}, capturedExecutable{}, fmt.Errorf("catalog: shell executable: %w", err)
-	}
-	envDigest, err := hashJSON(env)
-	if err != nil {
-		return shell.Options{}, capturedExecutable{}, err
-	}
-	options.ShellBinary = path
-	options.Env = env
-	return options, capturedExecutable{kind: "shell", path: path, contentSHA256: digest, environment: envDigest}, nil
-}
-
-func normalizeEnvironment(entries []string) ([]string, error) {
-	values := make(map[string]string, len(entries))
-	for _, entry := range entries {
-		if strings.ContainsRune(entry, 0) {
-			return nil, errors.New("environment entry contains NUL byte")
-		}
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || key == "" || strings.Contains(key, "=") {
-			return nil, errors.New("environment entry must have a non-empty key and '=' separator")
-		}
-		values[key] = value
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	normalized := make([]string, 0, len(keys))
-	for _, key := range keys {
-		normalized = append(normalized, key+"="+values[key])
-	}
-	return normalized, nil
-}
-
-func resolveExecutable(name string, environment []string) (string, string, error) {
-	if strings.ContainsRune(name, 0) || name == "" {
-		return "", "", errors.New("executable name is empty or contains NUL")
-	}
-	var candidates []string
-	if filepath.IsAbs(name) {
-		candidates = []string{name}
-	} else {
-		if strings.ContainsRune(name, filepath.Separator) {
-			return "", "", fmt.Errorf("relative executable path %q contains a separator", name)
-		}
-		pathValue := environmentValue(environment, "PATH")
-		for _, directory := range filepath.SplitList(pathValue) {
-			if directory == "" || !filepath.IsAbs(directory) {
-				continue
-			}
-			candidates = append(candidates, filepath.Join(directory, name))
-		}
-	}
-	for _, candidate := range candidates {
-		resolved, err := filepath.EvalSymlinks(candidate)
-		if err != nil {
-			continue
-		}
-		info, err := os.Stat(resolved)
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		digest, err := fileDigest(resolved)
-		if err != nil {
-			continue
-		}
-		return resolved, digest, nil
-	}
-	return "", "", fmt.Errorf("executable %q was not found as a readable regular executable", name)
-}
-
-func environmentValue(environment []string, key string) string {
-	prefix := key + "="
-	for _, entry := range environment {
-		if strings.HasPrefix(entry, prefix) {
-			return strings.TrimPrefix(entry, prefix)
-		}
-	}
-	return ""
-}
-
-func fileDigest(path string) (string, error) {
-	file, err := os.Open(path) //nolint:gosec // path is host configuration, not model input
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = file.Close() }()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func (executable capturedExecutable) dependency() executorDependency {
-	return executorDependency{Kind: executable.kind, Path: executable.path, ContentSHA256: executable.contentSHA256}
-}
-
-func verifyExecutable(executable capturedExecutable) error {
-	info, err := os.Stat(executable.path)
-	if err != nil {
-		return fmt.Errorf("catalog: verify %s executable: %w", executable.kind, err)
-	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-		return fmt.Errorf("catalog: %s executable is no longer a regular executable at %q", executable.kind, executable.path)
-	}
-	digest, err := fileDigest(executable.path)
-	if err != nil {
-		return fmt.Errorf("catalog: verify %s executable: %w", executable.kind, err)
-	}
-	if digest != executable.contentSHA256 {
-		return fmt.Errorf("catalog: %s executable identity drift at %q", executable.kind, executable.path)
-	}
-	return nil
 }
 
 func isNilLike(value any) bool {

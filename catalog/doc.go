@@ -9,7 +9,9 @@
 //
 // Schema hashes cover model-visible metadata. Executor hashes cover the stable
 // registration ID, a manually maintained per-tool revision, and inspectable
-// executable/environment provenance. Increment only the affected executor
+// executable/environment provenance. Executable aliases retain their absolute
+// invocation path while the resolved target is fingerprinted separately;
+// identity inputs must be valid UTF-8. Increment only the affected executor
 // revision when execution semantics change; metadata-only changes update schema
 // identity instead. Hosts must compose these leaf identities with their own
 // artifact, configuration, permission, retention, and mount identities.

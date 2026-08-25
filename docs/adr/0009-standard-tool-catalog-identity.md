@@ -66,11 +66,14 @@ schema-only change does not require an executor bump. Changing an identity
 record version or hash algorithm is itself an identity break.
 
 For search and shell, `Standard` normalizes and snapshots the environment,
-resolves an absolute executable through that captured `PATH`, hashes the
-executable bytes, and includes both the dependency record and environment
-digest in executor identity. Materialization rejects changed executable bytes.
-The deployment must keep that verified path immutable after materialization or
-enforce an equivalent invocation-time artifact guarantee.
+resolves an absolute invocation path through that captured `PATH`, preserves
+that path so symlink aliases retain their `argv[0]` semantics, resolves and
+hashes the executable target, and includes both paths plus the environment
+digest in executor identity. Materialization rejects a changed target or
+changed executable bytes. Environment and executable paths must be valid UTF-8
+so JSON identity records cannot collapse distinct Unix byte strings. The
+deployment must keep the verified invocation and target paths immutable after
+materialization or enforce an equivalent invocation-time artifact guarantee.
 
 Opaque injected dependencies—HTTP policy, user-interaction I/O, tracker writer
 configuration, and deployment immutability guarantees—have no canonical Go
