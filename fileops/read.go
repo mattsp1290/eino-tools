@@ -168,11 +168,11 @@ func (t *ReadTool) Run(ctx context.Context, args ReadArgs) ReadResult {
 			Path: args.Path,
 		}
 	}
-	if args.Offset != nil || args.Limit != nil {
-		return t.runLineWindow(ctx, args, resolved)
+	if !info.Mode().IsRegular() {
+		return ReadResult{BaseResult: failed(ErrCategoryIO, "file_read expects a regular file"), Path: args.Path}
 	}
 
-	f, err := os.Open(resolved) //nolint:gosec // path verified by resolveExisting
+	f, err := openRegularRead(t.workspacePath, resolved)
 	if err != nil {
 		return ReadResult{
 			BaseResult: failed(ErrCategoryIO,
@@ -181,6 +181,9 @@ func (t *ReadTool) Run(ctx context.Context, args ReadArgs) ReadResult {
 		}
 	}
 	defer func() { _ = f.Close() }()
+	if args.Offset != nil || args.Limit != nil {
+		return t.runLineWindow(ctx, args, f)
+	}
 
 	contentBytes := make([]byte, 0, MaxOutputBytes+1)
 	limited := io.LimitReader(f, int64(MaxOutputBytes)+1)
@@ -226,7 +229,7 @@ func (t *ReadTool) Run(ctx context.Context, args ReadArgs) ReadResult {
 	}
 }
 
-func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved string) ReadResult {
+func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, f *os.File) ReadResult {
 	offset := 1
 	if args.Offset != nil {
 		offset = *args.Offset
@@ -256,16 +259,6 @@ func (t *ReadTool) runLineWindow(ctx context.Context, args ReadArgs, resolved st
 			Path: args.Path,
 		}
 	}
-
-	f, err := os.Open(resolved) //nolint:gosec // path verified by resolveExisting
-	if err != nil {
-		return ReadResult{
-			BaseResult: failed(ErrCategoryIO,
-				fmt.Sprintf("open %q: %v", args.Path, err)),
-			Path: args.Path,
-		}
-	}
-	defer func() { _ = f.Close() }()
 
 	var content strings.Builder
 	var numbered strings.Builder

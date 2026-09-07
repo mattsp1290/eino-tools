@@ -128,7 +128,7 @@ func Standard(options Options) ([]Definition, error) {
 	userFactory := static(func() (tool.InvokableTool, error) { return userinteract.New(userSurface, userOptions) })
 
 	specs := []definitionSpec{
-		{id: IDFileRead, revision: 1, name: fileops.NameRead, binding: BindingWorkspace, retrySafe: true, info: fileops.ReadToolInfo,
+		{id: IDFileRead, revision: 2, name: fileops.NameRead, binding: BindingWorkspace, retrySafe: true, info: fileops.ReadToolInfo,
 			newTool: workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewReadTool(root) })},
 		{id: IDFileWrite, revision: 1, name: fileops.NameWrite, binding: BindingWorkspace, info: fileops.WriteToolInfo,
 			newTool: workspace(func(root string) (tool.InvokableTool, error) { return fileops.NewWriteTool(root) })},

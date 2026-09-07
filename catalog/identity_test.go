@@ -58,7 +58,7 @@ func TestIdentityGoldens(t *testing.T) {
 		IDTrackerWrite: "3192a21e8cbad3d50ba253ac6a4387497bae6683a2e6e8126bd8556cd58f86af",
 	}
 	executorGoldens := map[string]string{
-		IDFileRead:     "a0000cfdc19773589bde68fb10ccfbf819352ae3dfbbe5deef016911f8545ce1",
+		IDFileRead:     "c3250f0cc8b350303f82603ac55b5fca6a56b164569d81c3425cebd5db4cbdc6",
 		IDFileWrite:    "6eb94cd8d59fcabeeb281cc41cbba8f484cd0a6785f8f0a9946c5e722eab19cd",
 		IDFileEdit:     "e55b3e76d9625b2689b771eb3bc4549ca4df864280bdc0a4fa19d5a69dfcf7d1",
 		IDFileList:     "e6b88764b09e13c071d6b46926c00e95ae738fad82c49aa5ccc21ea6c7ad723f",
