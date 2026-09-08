@@ -24,6 +24,9 @@ func newToolInTempDir(t *testing.T, opts ...Options) (*Tool, string) {
 	} else if opts[0].Env == nil {
 		opts[0].Env = hermeticShellEnv(t)
 	}
+	if opts[0].StartupMode == "" {
+		opts[0].StartupMode = StartupModeNonLogin
+	}
 	tool, err := New(dir, opts...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -34,24 +37,7 @@ func newToolInTempDir(t *testing.T, opts ...Options) (*Tool, string) {
 func hermeticShellEnv(t *testing.T) []string {
 	t.Helper()
 
-	home := t.TempDir()
-	env := os.Environ()
-	out := make([]string, 0, len(env)+1)
-	haveHome := false
-	for _, e := range env {
-		if strings.HasPrefix(e, "HOME=") {
-			if !haveHome {
-				out = append(out, "HOME="+home)
-				haveHome = true
-			}
-			continue
-		}
-		out = append(out, e)
-	}
-	if !haveHome {
-		out = append(out, "HOME="+home)
-	}
-	return out
+	return []string{"HOME=" + t.TempDir(), "PATH=/usr/bin:/bin"}
 }
 
 func TestNewRejectsInvalidWorkspace(t *testing.T) {
@@ -398,7 +384,7 @@ func TestRunMissingWorkspaceIsExecFailed(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	tool, err := New(dir)
+	tool, err := New(dir, Options{StartupMode: StartupModeNonLogin, Env: hermeticShellEnv(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -412,5 +398,97 @@ func TestRunMissingWorkspaceIsExecFailed(t *testing.T) {
 	}
 	if res.Error == nil || res.Error.Category != ErrCategoryExecFailed {
 		t.Fatalf("Error = %+v, want exec_failed", res.Error)
+	}
+}
+
+func TestStartupConstructorAndArgv(t *testing.T) {
+	recorder := filepath.Join(t.TempDir(), "argv-recorder")
+	if err := os.WriteFile(recorder, []byte("#!/bin/sh\nprintf '%s\\0' \"$#\" \"$@\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := "  printf 'single' \"double\"\n$VALUE `uname`; cat file | tr a b > output\n"
+	for _, mode := range []StartupMode{"", StartupModeLogin, StartupModeNonLogin} {
+		options := Options{StartupMode: mode, ShellBinary: recorder, Env: hermeticShellEnv(t)}
+		tool, err := New(t.TempDir(), options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flag := "-lc"
+		if mode == StartupModeNonLogin {
+			flag = "-c"
+		}
+		options.StartupMode = "invalid"
+		options.ShellBinary = "/missing"
+		options.OutputCapBytes = 1
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		got := tool.Run(ctx, Args{Cmd: command})
+		cancel()
+		if got.Stdout != "2\x00"+flag+"\x00"+command+"\x00" || got.ExitCode != 0 || got.Error != nil {
+			t.Fatalf("mode %q: %+v", mode, got)
+		}
+	}
+	omitted, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if omitted.startupMode != StartupModeLogin {
+		t.Fatal("omitted options not login")
+	}
+	for _, options := range [][]Options{{{}, {}}, {{StartupMode: "bad"}}, {{StartupMode: " LOGIN"}}, {{OutputCapBytes: -1}}} {
+		if _, err := New(t.TempDir(), options...); err == nil {
+			t.Fatalf("accepted %+v", options)
+		}
+	}
+}
+
+func TestModelCannotOverridePolicy(t *testing.T) {
+	tool, _ := newToolInTempDir(t, Options{Env: []string{"VALUE=host"}, ShellBinary: "/bin/sh"})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	raw, err := tool.InvokableRun(ctx, `{"cmd":"printf '%s' \"$VALUE\"","startup_mode":"login","shell_binary":"/missing","env":["VALUE=model"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Result
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Stdout != "host" || got.Error != nil || got.ExitCode != 0 {
+		t.Fatalf("model altered host policy: %+v", got)
+	}
+	var schema struct{ Properties map[string]any }
+	if err := json.Unmarshal(Schema(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	if len(schema.Properties) != 2 {
+		t.Fatal("model schema gained authority")
+	}
+}
+
+func TestLeafEnvironmentInheritanceTiming(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BASH_ENV", "")
+	t.Setenv("ENV", "")
+	for _, empty := range []bool{true, false} {
+		t.Setenv("SHELL_PARENT_CANARY", "before")
+		options := Options{ShellBinary: "/bin/sh", StartupMode: StartupModeNonLogin}
+		if empty {
+			options.Env = []string{}
+		}
+		tool, err := New(t.TempDir(), options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("SHELL_PARENT_CANARY", "after")
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		got := tool.Run(ctx, Args{Cmd: "printf '%s' \"${SHELL_PARENT_CANARY-unset}\""})
+		cancel()
+		want := "after"
+		if empty {
+			want = "unset"
+		}
+		if got.Stdout != want || got.Error != nil || got.ExitCode != 0 {
+			t.Fatalf("empty=%t: %+v", empty, got)
+		}
 	}
 }

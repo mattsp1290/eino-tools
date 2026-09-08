@@ -52,7 +52,7 @@ func TestIdentityGoldens(t *testing.T) {
 		IDGlob:         "114cf917361f0872071618a4de79afbfc4973cdf7d8c816123bb99d422839635",
 		IDSearch:       "b68a144ee434ade6866f0f204a65990117504fd54716ece1a18a6956533842b3",
 		IDApplyPatch:   "cb9b7cef0b209523c4642f1a4e960bde35bdb209e4bc41d3f5363753b48e54b2",
-		IDShell:        "0d4ee75a2b725d44eac76bb35a8719cf5d85e5aa84e73c65ccd2816b1d0f5aa9",
+		IDShell:        "ae2e79c07b700f6644a3e3e66e423d9598266f1f07f16492bb7c6ae1686b44e8",
 		IDURLFetch:     "3677cf93d326c3a61ec402aafe85694a6ae080f98be555207c7bdea9d603f082",
 		IDUserInteract: "f16c14010138ab04a9dc3e57be1bfaf266ba0adc12bac66f2da6a018eb390f2f",
 		IDTrackerWrite: "3192a21e8cbad3d50ba253ac6a4387497bae6683a2e6e8126bd8556cd58f86af",
@@ -86,7 +86,7 @@ func TestExecutorHashGolden(t *testing.T) {
 		{Kind: "z-target", Path: "/synthetic/z", ContentSHA256: strings.Repeat("b", 64)},
 		{Kind: "a-invocation", Path: "/synthetic/a", ContentSHA256: strings.Repeat("a", 64)},
 	}
-	got, err := executorHash("synthetic.tool", 7, dependencies, strings.Repeat("e", 64))
+	got, err := executorHash("synthetic.tool", 7, dependencies, strings.Repeat("e", 64), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,5 +111,16 @@ func TestMakeDefinitionRejectsInvalidSpecs(t *testing.T) {
 		if definition, err := makeDefinition(spec); err == nil || definition.New != nil {
 			t.Errorf("invalid spec %d = %+v, %v; want zero definition and error", index, definition, err)
 		}
+	}
+}
+
+func TestShellPolicyIdentityGolden(t *testing.T) {
+	got, err := executorHash("synthetic.tool", 7, nil, "", &shellExecutionPolicy{StartupMode: "non-login", OutputCapBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "bb723868835d2e2d592519ad8d08c43da8ba80aab1ff03c3e9fbf65cc7bb1cea"
+	if got != want {
+		t.Fatalf("shell policy hash = %s, want %s", got, want)
 	}
 }

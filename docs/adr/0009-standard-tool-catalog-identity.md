@@ -51,6 +51,7 @@ canonical schema unchanged does not change identity.
 Executor identity is lowercase SHA-256 of canonical JSON with fixed fields:
 
 ```text
+shell_policy = optional { startup_mode, output_cap_bytes } (shell only)
 version = "eino-tools-tool-executor-v1"
 registration_id
 revision
@@ -103,3 +104,25 @@ claim `eino-agent` adoption.
   model names change.
 - A catalog-owned keyed locker: workspace authority and cross-tool
   serialization belong to the host.
+
+## Explicit shell policy (revision 2)
+
+Shell executor revision 2 includes an optional `shell_policy` record in the v1
+identity JSON. It records the normalized startup mode (empty becomes `login`)
+and effective positive output cap (zero becomes 256 KiB), taken from the same
+captured options as the factory. The record is omitted for every other tool,
+preserving their exact v1 identity bytes and goldens, including file-read
+revision 2. Mode changes affect executor identity only; metadata is independent
+of mode. The shell's policy-neutral metadata intentionally changes its schema
+identity in this release.
+
+Shell capture preserves nil versus explicit empty Env: nil snapshots the parent
+at `Standard`, whereas an empty slice remains a replacement with no parent
+entries. Caller mutations of options or Env cannot alter current or future
+materializations. Validation rejects unsupported modes before any definition is
+returned. Existing executable resolution and drift checks remain in force.
+
+New shell metadata/executor identities require newly constructed run plans.
+Do not bypass resume drift checks or mutate an existing mount. Rollback selects
+an earlier artifact for new runs with fresh plans; the host owns the effects of
+restoring login startup-file execution.

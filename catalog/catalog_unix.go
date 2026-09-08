@@ -27,6 +27,7 @@ import (
 )
 
 type definitionSpec struct {
+	shellPolicy  *shellExecutionPolicy
 	id           string
 	revision     int
 	name         string
@@ -142,7 +143,8 @@ func Standard(options Options) ([]Definition, error) {
 			dependencies: searchExecutable.dependencies(), environment: searchExecutable.environment, info: search.ToolInfo, newTool: searchFactory},
 		{id: IDApplyPatch, revision: 1, name: applypatch.Name, binding: BindingWorkspace, info: applypatch.ToolInfo,
 			newTool: workspace(func(root string) (tool.InvokableTool, error) { return applypatch.New(root) })},
-		{id: IDShell, revision: 1, name: shell.Name, binding: BindingWorkspace,
+		{id: IDShell, revision: 2, name: shell.Name, binding: BindingWorkspace,
+			shellPolicy:  &shellExecutionPolicy{StartupMode: string(shellOptions.StartupMode), OutputCapBytes: shellOptions.OutputCapBytes},
 			dependencies: shellExecutable.dependencies(), environment: shellExecutable.environment, info: shell.ToolInfo, newTool: shellFactory},
 		{id: IDURLFetch, revision: 1, name: urlfetch.Name, binding: BindingStatic, retrySafe: true, concurrent: true,
 			info: urlfetch.ToolInfo, newTool: urlFactory},
@@ -190,7 +192,7 @@ func makeDefinition(spec definitionSpec) (Definition, error) {
 	if err != nil {
 		return Definition{}, fmt.Errorf("catalog: schema identity for %s: %w", spec.id, err)
 	}
-	executorIdentity, err := executorHash(spec.id, spec.revision, spec.dependencies, spec.environment)
+	executorIdentity, err := executorHash(spec.id, spec.revision, spec.dependencies, spec.environment, spec.shellPolicy)
 	if err != nil {
 		return Definition{}, fmt.Errorf("catalog: executor identity for %s: %w", spec.id, err)
 	}

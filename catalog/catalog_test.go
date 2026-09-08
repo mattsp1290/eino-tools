@@ -199,7 +199,7 @@ func TestFactoriesHonorCanceledContext(t *testing.T) {
 }
 
 func TestWorkspaceRootIsolation(t *testing.T) {
-	definitions, err := Standard(Options{})
+	definitions, err := Standard(Options{ShellOptions: &shell.Options{StartupMode: shell.StartupModeNonLogin, Env: []string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir()}}})
 	if err != nil {
 		t.Fatalf("Standard: %v", err)
 	}

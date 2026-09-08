@@ -184,7 +184,8 @@ The full standard catalog executes on Unix. On non-Unix platforms its public
 types remain available, while `catalog.Standard` returns
 `catalog.ErrUnsupportedPlatform` and no definitions.
 
-`shell` intentionally runs model-provided commands as `sh -lc <cmd>` in the
+`shell` intentionally runs model-provided commands with host-configured policy
+(default `sh -lc <cmd>`, or explicit non-login `-c`) in the
 configured workspace. The package sets cwd, stdin, output caps, timeout, and
 process cancellation behavior; filesystem containment, network policy, secrets,
 and sandboxing are caller responsibilities.
@@ -209,3 +210,36 @@ The first target consumers are
 thin wrappers around these packages during adoption, and
 [`eino-agent`](https://github.com/mattsp1290/eino-agent), which consumes the
 coding-agent leaf tools.
+
+### Explicit shell startup policy
+
+Hosts can select non-login, noninteractive execution through the existing API:
+
+```go
+shell.New(workspace, shell.Options{
+    ShellBinary: "/bin/sh",
+    StartupMode: shell.StartupModeNonLogin,
+    Env: allowlistedEnv,
+})
+```
+
+The host supplies the admitted absolute workspace and allowlisted environment.
+Empty mode and `StartupModeLogin` preserve `sh -lc`; `StartupModeNonLogin`
+selects `-c`. Commands remain one unchanged argument. Unknown modes and negative
+output caps fail construction. Mode, binary and environment remain host options,
+not model schema properties. See the [compiling leaf example](shell/example_test.go)
+and [eino-agent mount example](integration/shellstartup/README.md).
+
+A nonnil Env replaces the environment, including an empty slice. Nil inherits
+at each leaf execution; the standard catalog snapshots inheritance at creation.
+Catalog policy and environment are copied; shell executor revision 2 fingerprints
+normalized mode and effective cap. Rebuild affected persisted plans under the new
+identity instead of bypassing drift checks.
+
+Configured binaries must accept the selected flags. Linux/macOS CI verify
+`/bin/sh -c` against synthetic HOME profiles, with isolated login regression CI.
+Non-login mode is not a sandbox: Bash invoked as `bash` may still read `BASH_ENV`.
+Hosts own environment scrubbing, executable provenance and OS containment.
+Cancellation kills the created process group, not deliberately detached processes.
+Root requires Go 1.26; the mount example uses eino-agent v0.3.3 and Go >=1.26.3.
+The complete catalog needs ripgrep even if only shell is exposed.
