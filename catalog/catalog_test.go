@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mattsp1290/eino-tools/search"
 	"github.com/mattsp1290/eino-tools/shell"
@@ -199,7 +200,7 @@ func TestFactoriesHonorCanceledContext(t *testing.T) {
 }
 
 func TestWorkspaceRootIsolation(t *testing.T) {
-	definitions, err := Standard(Options{})
+	definitions, err := Standard(Options{ShellOptions: &shell.Options{StartupMode: shell.StartupModeNonLogin, Env: []string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir()}}})
 	if err != nil {
 		t.Fatalf("Standard: %v", err)
 	}
@@ -367,12 +368,14 @@ func findDefinition(t *testing.T, definitions []Definition, id string) Definitio
 
 func invokeAt(t *testing.T, definition Definition, root, arguments string) string {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
 	instance := Instance{WorkspaceRoot: root}
-	toolInstance, err := definition.New(context.Background(), instance)
+	toolInstance, err := definition.New(ctx, instance)
 	if err != nil {
 		t.Fatalf("New %s: %v", definition.ID, err)
 	}
-	output, err := toolInstance.InvokableRun(context.Background(), arguments)
+	output, err := toolInstance.InvokableRun(ctx, arguments)
 	if err != nil {
 		t.Fatalf("Invoke %s: %v", definition.ID, err)
 	}

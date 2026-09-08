@@ -28,12 +28,18 @@ type executorDependency struct {
 	ContentSHA256 string `json:"content_sha256"`
 }
 
+type shellExecutionPolicy struct {
+	StartupMode    string `json:"startup_mode"`
+	OutputCapBytes int    `json:"output_cap_bytes"`
+}
+
 type executorIdentity struct {
-	Version        string               `json:"version"`
-	RegistrationID string               `json:"registration_id"`
-	Revision       int                  `json:"revision"`
-	Dependencies   []executorDependency `json:"dependencies"`
-	Environment    string               `json:"environment"`
+	ShellPolicy    *shellExecutionPolicy `json:"shell_policy,omitempty"`
+	Version        string                `json:"version"`
+	RegistrationID string                `json:"registration_id"`
+	Revision       int                   `json:"revision"`
+	Dependencies   []executorDependency  `json:"dependencies"`
+	Environment    string                `json:"environment"`
 }
 
 func schemaHash(info *schema.ToolInfo) (string, error) {
@@ -52,7 +58,7 @@ func schemaHash(info *schema.ToolInfo) (string, error) {
 	})
 }
 
-func executorHash(id string, revision int, dependencies []executorDependency, environment string) (string, error) {
+func executorHash(id string, revision int, dependencies []executorDependency, environment string, policy *shellExecutionPolicy) (string, error) {
 	deps := append([]executorDependency(nil), dependencies...)
 	sort.Slice(deps, func(i, j int) bool {
 		if deps[i].Kind == deps[j].Kind {
@@ -65,6 +71,7 @@ func executorHash(id string, revision int, dependencies []executorDependency, en
 	}
 	return hashJSON(executorIdentity{
 		Version:        executorIdentityVersion,
+		ShellPolicy:    policy,
 		RegistrationID: id,
 		Revision:       revision,
 		Dependencies:   deps,

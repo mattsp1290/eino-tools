@@ -113,6 +113,9 @@ jobs:
       - name: Test portable catalog contract
         run: go test ./catalog
 
+      - name: Test portable shell options validation
+        run: go test ./shell
+
   tracker-beads-integration:
     name: Tracker Beads Integration
     runs-on: ubuntu-latest
@@ -140,3 +143,91 @@ jobs:
 
       - name: Integration tests
         run: go test -tags=integration ./tracker/beads/...
+
+  shell-startup:
+    name: Shell startup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.x
+          cache-dependency-path: |
+            go.sum
+            integration/shellstartup/go.sum
+      - name: Install ripgrep
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update && sudo apt-get install -y ripgrep
+          elif ! command -v rg >/dev/null; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install ripgrep
+          fi
+          command -v rg
+      - name: Record platform and shell provenance
+        shell: bash
+        run: |
+          uname -srm
+          go version
+          rg --version
+          ls -l /bin/sh
+          if [[ "$RUNNER_OS" == Linux ]]; then dpkg-query -W dash bash; else /bin/bash --version; fi
+      - name: Leaf and catalog race tests
+        run: go test -race -v -count=1 ./shell ./catalog
+      - name: Mounted adapter acceptance
+        working-directory: integration/shellstartup
+        env:
+          GOWORK: 'off'
+        run: |
+          go mod tidy -diff
+          go vet ./...
+          go test -race -v -count=1 -timeout=120s ./...
+
+  shell-login-regression:
+    name: Shell login (isolated container)
+    runs-on: ubuntu-latest
+    # Official golang:1.26.3-bookworm manifest digest resolved 2026-09-08.
+    container:
+      image: golang:1.26.3-bookworm@sha256:386d475a660466863d9f8c766fec64d7fdad3edac2c6a05020c09534d71edb4b
+    env:
+      GOTOOLCHAIN: auto
+      GOWORK: 'off'
+      EINO_TOOLS_TEST_LOGIN: '1'
+    steps:
+      - name: Isolate login profiles inside disposable container
+        run: |
+          test -f /.dockerenv
+          printf '# inert test container profile\n' > /etc/profile
+          if test -f /etc/bash.bashrc; then printf '# inert\n' > /etc/bash.bashrc; fi
+          rm -rf /etc/profile.d
+          mkdir -p /etc/profile.d
+          apt-get update && apt-get install -y ripgrep
+      - uses: actions/checkout@v4
+      - name: Record platform and shell provenance
+        run: |
+          uname -srm
+          go version
+          rg --version
+          ls -l /bin/sh
+          dpkg-query -W dash bash
+      - name: Leaf and catalog login regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u BASH_ENV -u ENV go test -race -v -count=1 ./shell ./catalog | tee /tmp/leaf-tests.log
+          grep -F -- '--- PASS: TestStartupContract/login/' /tmp/leaf-tests.log
+          grep -F -- '--- PASS: TestStartupContract/profile-and-capture/login-profile-control' /tmp/leaf-tests.log
+      - name: Mounted login regressions
+        working-directory: integration/shellstartup
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy -diff
+          go vet ./...
+          env -u BASH_ENV -u ENV go test -race -v -count=1 -timeout=120s ./... | tee /tmp/mounted-tests.log
+          grep -F -- '--- PASS: TestMountedStartupContract/login/' /tmp/mounted-tests.log
+          grep -F -- '--- PASS: TestMountedStartupContract/profile-and-capture/login-profile-control' /tmp/mounted-tests.log

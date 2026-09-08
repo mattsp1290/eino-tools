@@ -3,6 +3,10 @@
 Source inspected: `/home/infra-admin/git/local-symphony/internal/worker/tools/shell`
 on 2026-05-25.
 
+This is a historical extraction inventory. Current behavior and host options are
+documented in [ADR 0002](../adr/0002-shell-options-and-sandbox.md); explicit
+non-login startup policy is now available while login remains the default.
+
 ## Files
 
 - `doc.go`: package contract, `sh -lc` rationale, sandbox boundary, stdin

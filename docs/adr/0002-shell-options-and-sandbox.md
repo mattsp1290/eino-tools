@@ -29,8 +29,11 @@ of the tool contract: callers and prompts expect shell syntax, not argv arrays.
 
 Expose constructor-level options for host-controlled behavior:
 
-- `Env`: optional environment overlay or replacement, depending on the final
-  local-symphony source inventory.
+- `Env`: nonnil means replacement, including an explicitly empty slice. Nil
+  inherits at each leaf execution; catalog construction snapshots nil inheritance.
+- `StartupMode`: empty or `StartupModeLogin` uses `-lc`;
+  `StartupModeNonLogin` uses `-c`. Unknown modes fail during construction through
+  portable `Options.Validate`, which also rejects negative output caps.
 - `ShellBinary`: override for the shell executable; default `sh`.
 - `OutputCapBytes`: maximum captured stdout/stderr bytes before truncation.
 
@@ -50,3 +53,17 @@ invent a partial sandbox in library code.
 
 Any future argv-mode shell variant needs a new design record because it changes
 prompt semantics and the model-facing schema.
+
+The configured executable must support the selected flag convention. Both modes
+pass command text as one unchanged argument and remain noninteractive; model JSON
+cannot select mode, binary, environment or output cap. Non-login `/bin/sh` avoids
+login profiles. This is not a universal startup-file exclusion promise: Bash
+invoked as `bash` can read `BASH_ENV` with `-c`. See the [Bash startup
+manual](https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html).
+Hosts still own executable selection, environment scrubbing and OS containment.
+
+Timeout and cancellation kill the created process group, including non-detached
+descendants. They do not prevent a process from deliberately detaching. Linux
+and macOS CI exercise `/bin/sh`; other Unix runtime behavior remains unverified.
+Real login regressions run only in a disposable CI container with inert system
+profiles and synthetic HOME. Never set `EINO_TOOLS_TEST_LOGIN=1` on a host.

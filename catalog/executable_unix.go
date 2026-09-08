@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -50,10 +51,13 @@ func captureShellOptions(input *shell.Options) (shell.Options, capturedExecutabl
 	options := shell.Options{}
 	if input != nil {
 		options = *input
-		options.Env = append([]string(nil), input.Env...)
+		options.Env = slices.Clone(input.Env)
 	}
-	if options.OutputCapBytes < 0 {
-		return shell.Options{}, capturedExecutable{}, fmt.Errorf("catalog: shell output cap bytes must be non-negative, got %d", options.OutputCapBytes)
+	if err := options.Validate(); err != nil {
+		return shell.Options{}, capturedExecutable{}, fmt.Errorf("catalog: %w", err)
+	}
+	if options.StartupMode == "" {
+		options.StartupMode = shell.StartupModeLogin
 	}
 	if options.OutputCapBytes == 0 {
 		options.OutputCapBytes = shell.DefaultOutputCapBytes

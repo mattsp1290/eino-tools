@@ -102,6 +102,7 @@ func (r Result) IsRetryable() bool {
 type Tool struct {
 	workspacePath  string
 	shellBinary    string
+	startupMode    StartupMode
 	env            []string
 	outputCapBytes int
 }
@@ -121,24 +122,24 @@ func New(workspacePath string, opts ...Options) (*Tool, error) {
 	return &Tool{
 		workspacePath:  workspacePath,
 		shellBinary:    options.ShellBinary,
+		startupMode:    options.StartupMode,
 		env:            options.Env,
 		outputCapBytes: options.OutputCapBytes,
 	}, nil
 }
 
 func resolveOptions(opts []Options) (Options, error) {
-	switch len(opts) {
-	case 0:
-		return (Options{}).withDefaults(), nil
-	case 1:
-		o := opts[0]
-		if o.OutputCapBytes < 0 {
-			return Options{}, fmt.Errorf("shell: output cap bytes must be non-negative, got %d", o.OutputCapBytes)
-		}
-		return o.withDefaults(), nil
-	default:
+	if len(opts) > 1 {
 		return Options{}, fmt.Errorf("shell: expected at most one Options value, got %d", len(opts))
 	}
+	var o Options
+	if len(opts) == 1 {
+		o = opts[0]
+	}
+	if err := o.Validate(); err != nil {
+		return Options{}, err
+	}
+	return o.withDefaults(), nil
 }
 
 const schemaJSON = `{
@@ -148,7 +149,7 @@ const schemaJSON = `{
     "cmd": {
       "type": "string",
       "minLength": 1,
-      "description": "Shell command body. Run as 'sh -lc <cmd>' in the agent's workspace cwd."
+      "description": "Shell command body. Executed with host-configured shell policy in the agent's workspace cwd."
     },
     "timeout_seconds": {
       "type": "integer",
@@ -200,7 +201,11 @@ func (t *Tool) Run(ctx context.Context, args Args) Result {
 	// gosec G204: model-supplied command execution is intentional. The
 	// caller/container owns workspace containment, sandboxing, and egress
 	// policy; this tool only sets cwd and the documented shell boundary.
-	cmd := exec.CommandContext(runCtx, t.shellBinary, "-lc", args.Cmd) //nolint:gosec
+	flag := "-lc"
+	if t.startupMode == StartupModeNonLogin {
+		flag = "-c"
+	}
+	cmd := exec.CommandContext(runCtx, t.shellBinary, flag, args.Cmd) //nolint:gosec
 	cmd.Dir = t.workspacePath
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -277,7 +282,7 @@ func ToolInfo() (*schema.ToolInfo, error) {
 	}
 	return &schema.ToolInfo{
 		Name:        Name,
-		Desc:        "Run a shell command via 'sh -lc <cmd>' in the agent's workspace cwd. Captures stdout, stderr, exit code, and duration. Per-call timeout defaults to 60s and is capped at 600s. Stdout/stderr are capped at 256 KiB each; oversize output sets truncated=true.",
+		Desc:        "Run a command with host-configured shell policy in the agent's workspace cwd. Captures stdout, stderr, exit code, and duration. Per-call timeout defaults to 60s and is capped at 600s. Stdout/stderr use host-configured per-stream caps (default 256 KiB); oversize output sets truncated=true.",
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(js),
 	}, nil
 }

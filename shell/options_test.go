@@ -51,3 +51,22 @@ func TestOptionsWithDefaultsKeepsExplicitEmptyEnvironment(t *testing.T) {
 		t.Fatalf("Env length = %d, want 0", len(got.Env))
 	}
 }
+
+func TestOptionsValidateStartupMode(t *testing.T) {
+	for _, mode := range []StartupMode{"", StartupModeLogin, StartupModeNonLogin} {
+		if err := (Options{StartupMode: mode}).Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mode := range []StartupMode{"invalid", " login", "LOGIN", "non-login ", "Login"} {
+		if err := (Options{StartupMode: mode}).Validate(); err == nil {
+			t.Fatalf("accepted %q", mode)
+		}
+	}
+	if err := (Options{OutputCapBytes: -1}).Validate(); err == nil {
+		t.Fatal("accepted negative cap")
+	}
+	if got := (Options{}).withDefaults().StartupMode; got != StartupModeLogin {
+		t.Fatalf("default = %q", got)
+	}
+}
