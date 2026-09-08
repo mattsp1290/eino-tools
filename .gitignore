@@ -35,3 +35,8 @@ go.work.sum
 .dolt/
 *.db
 .beads-credential-key
+
+# Local agent plans and code reviews
+/.agents/plans/
+/.agents/reviews/
+/reviews/
