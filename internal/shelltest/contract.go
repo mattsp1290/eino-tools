@@ -5,6 +5,7 @@ package shelltest
 
 import (
 	"context"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -106,7 +107,7 @@ func Contract(t *testing.T, factory Factory) {
 func profile(t *testing.T, factory Factory) {
 	root, home := Root(t), Root(t)
 	marker := filepath.Join(home, "profile-marker")
-	canary := "canary-" + filepath.Base(home)
+	canary := "canary-" + rand.Text()
 	Write(t, filepath.Join(home, ".profile"), "export STARTUP_CANARY='"+canary+"'\nprintf marker > \"$MARKER\"\n")
 	Write(t, filepath.Join(root, "workspace-file"), "workspace\n")
 	options := &shell.Options{ShellBinary: "/bin/sh", StartupMode: shell.StartupModeNonLogin, OutputCapBytes: 4096, Env: []string{"PATH=/usr/bin:/bin", "HOME=" + home, "MARKER=" + marker}}
@@ -159,7 +160,7 @@ func descendants(t *testing.T, factory Factory, mode shell.StartupMode, cancelPa
 	defer cancel()
 	// The shell records its process group and the child's PID before readiness.
 	// The child is intentionally non-detached; detached descendants are out of scope.
-	command := "printf '%s' $$ > group; (sleep 3; printf survived > sentinel) & child=$!; printf '%s' \"$child\" > child; printf ready > ready; wait"
+	command := "printf '%s' $$ > group; (printf ready > child-ready; sleep 3; printf survived > sentinel) & child=$!; printf '%s' \"$child\" > child; while [ ! -f child-ready ]; do sleep 0.01; done; printf ready > ready; wait"
 	done := make(chan shell.Result, 1)
 	go func() { done <- run(ctx, shell.Args{Cmd: command, TimeoutSeconds: 2}) }()
 	t.Cleanup(func() {

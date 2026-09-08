@@ -113,6 +113,9 @@ jobs:
       - name: Test portable catalog contract
         run: go test ./catalog
 
+      - name: Test portable shell options validation
+        run: go test ./shell
+
   tracker-beads-integration:
     name: Tracker Beads Integration
     runs-on: ubuntu-latest

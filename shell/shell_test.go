@@ -15,6 +15,13 @@ import (
 	"github.com/mattsp1290/eino-tools/result"
 )
 
+func shellTestContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func newToolInTempDir(t *testing.T, opts ...Options) (*Tool, string) {
 	t.Helper()
 
@@ -77,7 +84,7 @@ func TestRunSuccessfulCommand(t *testing.T) {
 	t.Parallel()
 
 	tool, _ := newToolInTempDir(t)
-	res := tool.Run(context.Background(), Args{Cmd: "printf hello"})
+	res := tool.Run(shellTestContext(t), Args{Cmd: "printf hello"})
 
 	if res.Outcome != result.OutcomeSucceeded {
 		t.Fatalf("Outcome = %q, want succeeded (err=%+v)", res.Outcome, res.Error)
@@ -97,7 +104,7 @@ func TestRunCwdIsWorkspace(t *testing.T) {
 	t.Parallel()
 
 	tool, dir := newToolInTempDir(t)
-	res := tool.Run(context.Background(), Args{Cmd: "pwd"})
+	res := tool.Run(shellTestContext(t), Args{Cmd: "pwd"})
 	if res.Outcome != result.OutcomeSucceeded {
 		t.Fatalf("Outcome = %q, want succeeded", res.Outcome)
 	}
@@ -113,7 +120,7 @@ func TestRunNonzeroExitIsSucceededOutcome(t *testing.T) {
 	t.Parallel()
 
 	tool, _ := newToolInTempDir(t)
-	res := tool.Run(context.Background(), Args{Cmd: "exit 7"})
+	res := tool.Run(shellTestContext(t), Args{Cmd: "exit 7"})
 
 	if res.Outcome != result.OutcomeSucceeded {
 		t.Fatalf("Outcome = %q, want succeeded", res.Outcome)
@@ -131,7 +138,7 @@ func TestRunTimeout(t *testing.T) {
 
 	tool, _ := newToolInTempDir(t)
 	start := time.Now()
-	res := tool.Run(context.Background(), Args{Cmd: "sleep 5", TimeoutSeconds: 1})
+	res := tool.Run(shellTestContext(t), Args{Cmd: "sleep 5", TimeoutSeconds: 1})
 
 	if res.Outcome != result.OutcomeFailed {
 		t.Fatalf("Outcome = %q, want failed", res.Outcome)
@@ -151,7 +158,7 @@ func TestRunOutputCapTruncatesStreams(t *testing.T) {
 	t.Parallel()
 
 	tool, _ := newToolInTempDir(t, Options{OutputCapBytes: 8})
-	res := tool.Run(context.Background(), Args{
+	res := tool.Run(shellTestContext(t), Args{
 		Cmd: "printf abcdefghijklmnop; printf qrstuvwxyz 1>&2",
 	})
 
@@ -170,7 +177,7 @@ func TestRunEnvOption(t *testing.T) {
 	t.Parallel()
 
 	tool, _ := newToolInTempDir(t, Options{Env: []string{"EINO_TOOLS_PROBE=ok"}})
-	res := tool.Run(context.Background(), Args{Cmd: "printf $EINO_TOOLS_PROBE"})
+	res := tool.Run(shellTestContext(t), Args{Cmd: "printf $EINO_TOOLS_PROBE"})
 
 	if res.Outcome != result.OutcomeSucceeded {
 		t.Fatalf("Outcome = %q, want succeeded", res.Outcome)
@@ -184,7 +191,7 @@ func TestRunShellBinaryOptionExecFailed(t *testing.T) {
 	t.Parallel()
 
 	tool, _ := newToolInTempDir(t, Options{ShellBinary: "/path/to/no/such/sh"})
-	res := tool.Run(context.Background(), Args{Cmd: "printf nope"})
+	res := tool.Run(shellTestContext(t), Args{Cmd: "printf nope"})
 
 	if res.Outcome != result.OutcomeFailed {
 		t.Fatalf("Outcome = %q, want failed", res.Outcome)
@@ -209,7 +216,7 @@ func TestRunValidationFailures(t *testing.T) {
 	}
 
 	for _, args := range tests {
-		res := tool.Run(context.Background(), args)
+		res := tool.Run(shellTestContext(t), args)
 		if res.Outcome != result.OutcomeFailed {
 			t.Fatalf("args=%+v Outcome = %q, want failed", args, res.Outcome)
 		}
@@ -223,7 +230,7 @@ func TestRunParentCancellation(t *testing.T) {
 	t.Parallel()
 
 	tool, _ := newToolInTempDir(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(shellTestContext(t))
 	cancel()
 
 	res := tool.Run(ctx, Args{Cmd: "printf x"})
@@ -247,7 +254,7 @@ func TestInvokableRunParsing(t *testing.T) {
 	}
 
 	for _, in := range tests {
-		if _, err := tool.InvokableRun(context.Background(), in); err == nil {
+		if _, err := tool.InvokableRun(shellTestContext(t), in); err == nil {
 			t.Fatalf("InvokableRun(%q) returned nil error", in)
 		}
 	}
@@ -257,7 +264,7 @@ func TestInvokableRunSuccessSerializes(t *testing.T) {
 	t.Parallel()
 
 	tool, _ := newToolInTempDir(t)
-	out, err := tool.InvokableRun(context.Background(), `{"cmd":"printf hi"}`)
+	out, err := tool.InvokableRun(shellTestContext(t), `{"cmd":"printf hi"}`)
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
@@ -392,7 +399,7 @@ func TestRunMissingWorkspaceIsExecFailed(t *testing.T) {
 		t.Fatalf("RemoveAll: %v", err)
 	}
 
-	res := tool.Run(context.Background(), Args{Cmd: "printf x"})
+	res := tool.Run(shellTestContext(t), Args{Cmd: "printf x"})
 	if res.Outcome != result.OutcomeFailed {
 		t.Fatalf("Outcome = %q, want failed", res.Outcome)
 	}
